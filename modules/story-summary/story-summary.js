@@ -71,7 +71,9 @@ import {
 } from "./data/store.js";
 import { normalizeCharacterAliases } from "./data/character-aliases.js";
 import { stampEditedCharacters } from "./data/character-edits.js";
-import { normalizeEventMemoryRole, projectEditedSummaryEvents } from "./data/events.js";
+import { normalizeEventMemoryRole, stampEditedSummaryEvents } from "./data/events.js";
+import { formatCharacterProfiles, normalizeProfiles, reconcileProfileAliases, stampEditedProfiles } from "./data/character-profiles.js";
+import { normalizeInjectionSettings, resolveSummaryInjection } from "./data/injection-settings.js";
 import { isRelationFact, parseRelationTarget } from "./data/fact-predicates.js";
 import { formatStorySummaryL2Events } from "./prompt-events.js";
 import { projectStoryCharacters } from "./prompt-characters.js";
@@ -184,7 +186,7 @@ import { invalidateLexicalIndex, warmupIndex, removeDocumentsByFloor, addEventDo
 const MODULE_ID = "storySummary";
 const messageButtonOwnership = createMessageButtonOwnership();
 const iframePath = `${extensionFolderPath}/modules/story-summary/story-summary.html`;
-const VALID_SECTIONS = ["keywords", "events", "characters", "arcs", "facts"];
+const VALID_SECTIONS = ["keywords", "events", "characters", "arcs", "facts", "profiles"];
 const MESSAGE_EVENT = "message";
 const SUMMARY_MODEL_FETCH_PROVIDERS = new Set(["openai"]);
 const SUMMARY_MODEL_FETCH_TIMEOUT_MS = 5000;
@@ -523,7 +525,6 @@ let backupDeleteUnsupportedReason = '';
 let backupManagerCleanup = null;
 
 const EXT_PROMPT_KEY = "LittleWhiteBox_StorySummary";
-const MIN_INJECTION_DEPTH = 2;
 const R_AGG_MAX_CHARS = 256;
 
 function buildRAggregateText(atom) {
@@ -2231,6 +2232,7 @@ function buildFramePayload(store) {
             relationships: extractRelationshipsFromFacts(facts),
         },
         arcs: json.arcs || [],
+        profiles: normalizeProfiles(json.profiles),
         facts,
         lastSummarizedMesId: store?.lastSummarizedMesId ?? -1,
     };
@@ -2341,8 +2343,9 @@ function cloneSummaryJsonForPortability(json) {
             })).filter((item) => item.text)
             : [],
         events: Array.isArray(src.events)
-            ? src.events.map((item) => ({
+            ? src.events.map((item, index) => ({
                 id: String(item?.id || "").trim(),
+                sortOrder: Number.isFinite(item?.sortOrder) ? item.sortOrder : index,
                 title: String(item?.title || "").trim(),
                 timeLabel: String(item?.timeLabel || "").trim(),
                 summary: stripFloorMarker(item?.summary),
@@ -2390,6 +2393,13 @@ function cloneSummaryJsonForPortability(json) {
                     : [],
             })).filter((item) => item.name)
             : [],
+        profiles: normalizeProfiles(src.profiles).map(profile => ({
+            ...profile,
+            _addedAt: 0,
+            fields: Object.fromEntries(Object.entries(profile.fields).map(([key, field]) => [key, { ...field, sourceFloor: null }])),
+            candidates: profile.candidates.map(candidate => ({ ...candidate, sourceFloor: null })),
+            history: profile.history.map(entry => ({ ...entry, sourceFloor: null })),
+        })),
         facts: Array.isArray(src.facts)
             ? src.facts.map(normalizeInternalFact).filter((item) => item.s && item.p && item.o)
             : [],
@@ -2411,6 +2421,7 @@ function extractSummaryImportJson(raw) {
         Array.isArray(candidate.keywords) ||
         Array.isArray(candidate.events) ||
         Array.isArray(candidate.arcs) ||
+        Array.isArray(candidate.profiles) ||
         Array.isArray(candidate.facts) ||
         (candidate.characters && typeof candidate.characters === "object");
 
@@ -2442,6 +2453,7 @@ function buildSummaryExportPackage(store) {
             characters: json.characters.main.length,
             aliases: json.characterAliases.length,
             arcs: json.arcs.length,
+            profiles: json.profiles.length,
             facts: json.facts.length,
         },
     };
@@ -2532,7 +2544,8 @@ function formatStorySummaryMemoryText(store) {
         })
         .filter(Boolean));
 
-    return lines.join("\n").trim();
+    const profiles = formatCharacterProfiles(json.profiles, { maxChars: Number.MAX_SAFE_INTEGER });
+    return [profiles.text, lines.join("\n").trim()].filter(Boolean).join("\n\n");
 }
 
 function stampImportedSummaryJson(json, boundary) {
@@ -2547,6 +2560,7 @@ function stampImportedSummaryJson(json, boundary) {
     for (const item of (json.events || [])) {
         if (item && typeof item === "object") item._addedAt = boundary;
     }
+    for (const profile of (json.profiles || [])) profile._addedAt = boundary;
 
     const mainCharacters = json.characters?.main || [];
     for (const item of mainCharacters) {
@@ -3545,18 +3559,25 @@ async function handleFrameMessage(event) {
             break;
 
         case "UPDATE_SECTION": {
+            if (data.chatId && data.chatId !== getContext().chatId) break;
             const store = getSummaryStore();
             if (!store) break;
+            if (!VALID_SECTIONS.includes(data.section)) break;
+            cancelRecallAndClearPrompt('summary-edited');
             store.json ||= {};
 
             // 如果是 events，先记录旧数据用于同步向量
             const oldEvents = data.section === "events" ? [...(store.json.events || [])] : null;
             const oldFacts = data.section === "facts" ? [...(store.json.facts || [])] : null;
 
-            if (VALID_SECTIONS.includes(data.section)) {
+            if (data.section === "profiles") {
+                store.json.profiles = reconcileProfileAliases(
+                    stampEditedProfiles(store.json.profiles, data.data, getCurrentFloorHint()), store.json.characterAliases,
+                );
+            } else if (VALID_SECTIONS.includes(data.section)) {
                 store.json[data.section] = data.section === "characters"
                     ? stampEditedCharacters(store.json.characters, data.data, getCurrentFloorHint())
-                    : data.section === "events" ? projectEditedSummaryEvents(data.data) : data.data;
+                    : data.section === "events" ? stampEditedSummaryEvents(oldEvents, data.data, getCurrentFloorHint()) : data.data;
             }
             if (data.section === "facts") {
                 store.json.facts = mergeEditedFactsWithTimestamps(oldFacts, data.data, getCurrentFloorHint());
@@ -3568,6 +3589,7 @@ async function handleFrameMessage(event) {
             }
             store.updatedAt = Date.now();
             saveSummaryStore();
+            postToFrame({ type: "SUMMARY_FULL_DATA", payload: buildFramePayload(store) });
 
             // 同步 L2 检索索引（事件新增、编辑、删除）
             if (data.section === "events" && oldEvents) {
@@ -3642,6 +3664,7 @@ async function handleFrameMessage(event) {
                         savedConfig = await saveSummaryPanelConfigVerified(data.config);
                     }
                     const nextVectorConfig = savedConfig?.vector || {};
+                    cancelRecallAndClearPrompt('summary-config-saved');
                     const vectorEnabledChanged = !!previousVectorConfig?.enabled !== !!nextVectorConfig?.enabled;
                     const vectorFingerprintChanged = !!previousVectorConfig?.enabled
                         && !!nextVectorConfig?.enabled
@@ -4171,13 +4194,13 @@ async function prepareMemoryPrompt(type, signal) {
         boundary = chatLen - 1;
     }
     timing.boundary = Math.round(performance.now() - T_Boundary);
-    if (boundary < 0) {
+    const cfg = getSummaryPanelConfig();
+    const profiles = formatCharacterProfiles(store?.json?.profiles, { maxChars: normalizeInjectionSettings(cfg.trigger).profileCharBudget });
+    if (boundary < 0 && !profiles.text) {
         return finish('no_boundary');
     }
 
-    // 计算深度：倒序插入，从末尾往前数
-    // 最小为 MIN_INJECTION_DEPTH，避免插入太靠近底部
-    const depth = Math.max(MIN_INJECTION_DEPTH, chatLen - boundary - 1);
+    const { depth } = resolveSummaryInjection(cfg.trigger, chatLen, boundary);
     if (depth < 0) {
         return finish('invalid_depth');
     }
@@ -4188,7 +4211,9 @@ async function prepareMemoryPrompt(type, signal) {
     let notice = null;
     let publishRecallLog = false;
     const T_BuildPrompt = performance.now();
-    if (vectorCfg?.enabled && !usePendingCanonicalSummary) {
+    if (boundary < 0) {
+        text = '';
+    } else if (vectorCfg?.enabled && !usePendingCanonicalSummary) {
         const r = await buildVectorPromptText(excludeLastAi, {
             signal,
         });
@@ -4203,9 +4228,12 @@ async function prepareMemoryPrompt(type, signal) {
         text = buildNonVectorPromptText() || "";
     }
     timing.buildPrompt = Math.round(performance.now() - T_BuildPrompt);
+    text = [profiles.text, text].filter(Boolean).join('\n\n');
+    if (profiles.omittedFields) {
+        notice ||= { message: `人物基础档案有 ${profiles.omittedFields} 个字段超出注入字数预算，请在总结设置中提高预算或取消次要人物的常驻。`, issueCode: 'profile_budget' };
+    }
 
     // 获取用户配置的 role
-    const cfg = getSummaryPanelConfig();
     const roleKey = cfg.trigger?.role || 'system';
     const role = ROLE_MAP[roleKey] || extension_prompt_roles.SYSTEM;
 

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>小白总结 · 本地验收沙盒</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: #e9edf3; font: 14px/1.5 system-ui, sans-serif; color: #243046; }
+        header { padding: 10px 18px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; background: #243046; color: white; }
+        button { padding: 7px 12px; border: 1px solid #a5b7ca; background: transparent; color: inherit; border-radius: 6px; cursor: pointer; }
+        #status { flex: 1; font-size: 12px; }
+        iframe { display: block; width: 100%; height: calc(100vh - 62px); border: 0; background: white; margin: 0 auto; }
+        body.narrow iframe { width: min(390px, 100%); }
+    </style>
+</head>
+<body>
+    <header>
+        <strong>本地验收沙盒</strong>
+        <span id="status" role="status">仅虚构数据 · 不连接模型，不读写酒馆 · 刷新此页重置</span>
+        <button id="reopen">重开面板</button>
+        <button id="simulate">模拟下一批总结</button>
+        <button id="viewport">窄屏 / 桌面</button>
+    </header>
+    <iframe id="preview" title="总结面板预览"></iframe>
+    <script type="module" src="/scripts/story-summary-preview/preview.js"></script>
+</body>
+</html>

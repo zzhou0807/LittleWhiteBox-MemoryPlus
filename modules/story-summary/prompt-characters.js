@@ -1,4 +1,5 @@
 import { parseRelationTarget } from './data/fact-predicates.js';
+import { normalizeProfiles, PROFILE_FIELDS } from './data/character-profiles.js';
 
 const text = value => typeof value === 'string' ? value.trim() : '';
 const key = value => text(value).normalize('NFKC').toLocaleLowerCase();
@@ -24,14 +25,24 @@ export function projectStoryCharacters(store, { throughMessageIndex, currentMess
     const selectedName = key(name);
     let remaining = budget;
     const people = [];
-    for (const person of json.characters?.main || []) {
+    const profiles = normalizeProfiles(json.profiles);
+    const main = [...(json.characters?.main || [])];
+    const known = new Set(main.map(person => key(typeof person === 'string' ? person : person?.name)));
+    main.push(...profiles.filter(profile => !known.has(key(profile.name))));
+    for (const person of main) {
         const personName = text(typeof person === 'string' ? person : person?.name);
         if (!at(person, throughMessageIndex) || !personName) continue;
-        const names = aliases.filter(item => key(item.to) === key(personName)).map(item => text(item.from)).filter(Boolean);
+        const profile = profiles.find(item => key(item.name) === key(personName));
+        const names = [...new Set([...aliases.filter(item => key(item.to) === key(personName)).map(item => text(item.from)).filter(Boolean), ...(profile?.aliases || [])])];
         if (selectedName && selectedName !== key(personName) && !names.some(alias => key(alias) === selectedName)) continue;
         const related = value => [key(personName), ...names.map(key)].includes(key(value));
         const arc = selectedName && (json.arcs || []).find(item => related(item.name) && at(item, throughMessageIndex));
         const lines = [];
+        if (selectedName && profile) {
+            for (const [field, label] of Object.entries(PROFILE_FIELDS)) {
+                if (profile.fields[field].value) lines.push(`${label}：${profile.fields[field].value}`);
+            }
+        }
         if (arc) {
             if (text(arc.trajectory)) lines.push(`人物弧光：${text(arc.trajectory)}`);
             for (const moment of arc.moments || []) {

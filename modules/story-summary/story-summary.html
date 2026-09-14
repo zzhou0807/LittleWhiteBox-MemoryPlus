@@ -8,6 +8,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>剧情总结 · Story Summary</title>
     <link rel="stylesheet" href="story-summary.css">
+    <link rel="stylesheet" href="memory-enhancements.css">
     <style>
         #xb-frame-boot {
             position: fixed;
@@ -67,7 +68,7 @@
         <header>
             <div>
                 <h1 style="user-select: none;">剧情<span>总结</span></h1>
-                <div class="subtitle">Story Summary · Timeline · Character Arcs</div>
+                <div class="subtitle">Story Summary · Memory+ 1 · 人物底稿 / 自由排序</div>
             </div>
             <div class="stats">
                 <div class="stat">
@@ -108,6 +109,7 @@
             </div>
             <span class="spacer"></span>
             <div class="btn-group">
+                <button class="btn" id="btn-injection-settings" title="调整总结在提示词中的注入深度">注入位置</button>
                 <button class="btn btn-icon" id="btn-settings">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="3" />
@@ -144,6 +146,14 @@
             </div>
 
             <div class="right">
+                <section class="card memory-profiles">
+                    <div class="sec-head">
+                        <div class="sec-title">人物基础档案</div>
+                        <button class="sec-btn" data-section="profiles">编辑 / 审核</button>
+                    </div>
+                    <p class="memory-muted">固定人设单独保存 · 锁定字段须审核 · 常驻档案不依赖向量召回</p>
+                    <div class="memory-profiles-list scroll" id="base-profiles-list"></div>
+                </section>
                 <!-- Facts -->
                 <section class="card facts">
                     <div class="sec-head">
@@ -174,7 +184,7 @@
                 <!-- Profile -->
                 <section class="card profile">
                     <div class="sec-head">
-                        <div class="sec-title">人物档案</div>
+                        <div class="sec-title">关系与成长</div>
                         <div class="sec-actions">
                             <div class="custom-select" id="char-sel">
                                 <div class="sel-trigger" id="char-sel-trigger">
@@ -406,6 +416,31 @@
                                 <input type="number" id="trigger-delay-floors" min="0" max="30" step="1" value="2">
                             </div>
                         </div>
+
+                        <section class="memory-injection-options" id="memory-injection-settings">
+                            <h3>总结注入位置</h3>
+                            <div class="settings-row">
+                                <div class="settings-field">
+                                    <label for="injection-mode">位置策略（全局默认）</label>
+                                    <select id="injection-mode">
+                                        <option value="auto">自动：跟随总结 / 向量边界</option>
+                                        <option value="fixed">手动：固定聊天深度</option>
+                                    </select>
+                                </div>
+                                <div class="settings-field">
+                                    <label for="injection-depth">距聊天末尾的消息数（0 = 末尾）</label>
+                                    <input id="injection-depth" type="number" min="0" max="9999" step="1" value="4">
+                                </div>
+                                <div class="settings-field">
+                                    <label for="profile-char-budget">基础档案独立预算（字符）</label>
+                                    <input id="profile-char-budget" type="number" min="1000" max="32000" step="1000" value="8000">
+                                </div>
+                            </div>
+                            <p class="memory-muted" id="injection-position-status" aria-live="polite"></p>
+                            <p class="memory-muted">深度越小越靠近末尾。下方“强制插入到聊天最后”优先于以上策略。此设置不改变隐藏楼层；关闭当前聊天启用仍会停止全部记忆注入。</p>
+                            <button class="btn btn-sm" id="preview-base-profiles" type="button">预览人物底稿（不调用模型）</button>
+                            <pre class="memory-injection-preview" id="base-profiles-preview"></pre>
+                        </section>
 
                         <!-- Auto Summary with sub-options -->
                         <div class="settings-checkbox-group">
@@ -1113,6 +1148,7 @@
                 </div>
             </div>
             <div class="modal-foot">
+                <span class="memory-save-status" id="settings-save-status" role="status"></span>
                 <button class="btn" id="settings-cancel">取消</button>
                 <button class="btn btn-p" id="settings-save">保存</button>
             </div>

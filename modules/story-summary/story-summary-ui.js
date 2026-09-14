@@ -1,8 +1,11 @@
 ﻿// story-summary-ui.js
 // iframe 内 UI 逻辑
 
-import { EVENT_MEMORY_ROLES, projectEditedSummaryEvents } from './data/events.js';
+import { orderSummaryEvents, projectEditedSummaryEvents } from './data/events.js';
 import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './data/summary-delay.js';
+import { formatCharacterProfiles, normalizeProfiles } from './data/character-profiles.js';
+import { normalizeInjectionSettings } from './data/injection-settings.js';
+import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/memory-editors.js';
 
 (function () {
     'use strict';
@@ -252,7 +255,8 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
 
     const SECTION_META = {
         keywords: { title: '编辑关键词', hint: '每行一个关键词，格式：关键词|权重（核心/重要/一般）' },
-        events: { title: '编辑事件时间线', hint: '编辑时，每个事件要素都应完整' },
+        events: { title: '编辑事件时间线', hint: '可在任意事件前后插入、上下移动或撤销操作；最后保存，取消则不改动原数据。' },
+        profiles: { title: '人物基础档案 · 编辑与审核', hint: '锁定字段不会被 AI 直接覆盖。空白字段可由后续总结补充；临时关系和情绪不属于固定人设。操作在点击保存后生效。' },
         characters: { title: '编辑人物关系', hint: '编辑时，每个要素都应完整' },
         arcs: { title: '编辑角色弧光', hint: '编辑时，每个要素都应完整' },
         facts: { title: '编辑事实图谱', hint: '每行一条：主体|谓词|值|趋势(可选)。删除用：主体|谓词|（留空值）' }
@@ -319,7 +323,8 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
         }
     };
 
-    let summaryData = { keywords: [], events: [], characters: { main: [], relationships: [] }, arcs: [], facts: [] };
+    let summaryData = { keywords: [], events: [], characters: { main: [], relationships: [] }, arcs: [], facts: [], profiles: [] };
+    let profileEditor = null;
     let builtInSummaryPrompts = { ...EMPTY_BUILTIN_SUMMARY_PROMPTS };
     let localGenerating = false;
     let vectorGenerating = false;
@@ -1195,6 +1200,7 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
     }
 
     function openSettings() {
+        $('settings-save-status').textContent = '';
         $('api-provider').value = config.api.provider;
         $('api-url').value = config.api.url;
         $('api-key').value = config.api.key;
@@ -1214,6 +1220,11 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
         $('trigger-wrapper-head').value = config.trigger.wrapperHead || '';
         $('trigger-wrapper-tail').value = config.trigger.wrapperTail || '';
         $('trigger-insert-at-end').checked = !!config.trigger.forceInsertAtEnd;
+        const injection = normalizeInjectionSettings(config.trigger);
+        $('injection-mode').value = injection.injectionMode;
+        $('injection-depth').value = injection.injectionDepth;
+        $('profile-char-budget').value = injection.profileCharBudget;
+        syncInjectionControls();
         fillBuiltInSummaryPromptFields();
         $('memory-prompt-template').value = config.prompts.memoryTemplate || '';
         $('api-connect-status').textContent = '';
@@ -1289,6 +1300,12 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
         config.trigger.wrapperHead = $('trigger-wrapper-head').value;
         config.trigger.wrapperTail = $('trigger-wrapper-tail').value;
         config.trigger.forceInsertAtEnd = $('trigger-insert-at-end').checked;
+        Object.assign(config.trigger, normalizeInjectionSettings({
+            injectionMode: $('injection-mode').value,
+            injectionDepth: $('injection-depth').value,
+            profileCharBudget: $('profile-char-budget').value,
+            forceInsertAtEnd: config.trigger.forceInsertAtEnd,
+        }));
         config.prompts.memoryTemplate = $('memory-prompt-template').value;
         config.textFilterRules = collectFilterRules();
         config.vector = getVectorConfig();
@@ -1309,12 +1326,12 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
     async function saveSettings() {
         if (!settingsOpenedWithServerConfig) {
             postMsg('REQUEST_PANEL_CONFIG');
-            setStatusText($('api-connect-status'), '服务器配置尚未加载完成，请关闭设置后重开再保存', 'error');
+            setStatusText($('settings-save-status'), '服务器配置尚未加载完成，请关闭设置后重开再保存', 'error');
             return false;
         }
         collectSettingsFormToConfig();
         const btn = $('settings-save');
-        const statusEl = $('api-connect-status');
+        const statusEl = $('settings-save-status');
         resetSettingsSaveUi();
         if (btn) {
             btn.disabled = true;
@@ -1322,7 +1339,7 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
         }
         if (statusEl) setStatusText(statusEl, '保存中...', 'loading');
         const savePromise = saveConfig({
-            statusId: 'api-connect-status',
+            statusId: 'settings-save-status',
             loadingMessage: '保存中...',
             successMessage: '配置已保存',
             timeoutMs: 5000,
@@ -1446,6 +1463,7 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
     }
 
     function renderTimeline(ev, options = {}) {
+        ev = orderSummaryEvents(ev || []);
         const scrollState = getTimelineScrollState();
         summaryData.events = ev || [];
         const c = $('timeline-list');
@@ -1943,7 +1961,7 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
                         ? '撤销首次总结生成的内容；人工修改不会被覆盖，存在冲突时将拒绝回退。聊天记录不会删除。'
                         : `撤销最近一次总结，已总结楼层将回退到 ${cleanActionState.rollbackTargetSummarizedUpTo} 楼。聊天记录不会删除。`)
                     : '当前没有可回退的总结快照。';
-                clearDesc.textContent = '删除本聊天的全部总结数据，聊天记录不会删除。';
+                clearDesc.textContent = '删除本聊天的全部总结数据（包括基础档案、锁定设定与审核记录）。请先复制记忆包备份；聊天记录不会删除。';
             }
 
             const close = (result) => {
@@ -2070,64 +2088,8 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
         del.onclick = () => item.remove();
     }
 
-    function memoryRoleOptions(role = '') {
-        return `<option value=""${role ? '' : ' selected'}>未标注</option>`
-            + EVENT_MEMORY_ROLES.map(value => `<option value="${h(value)}"${role === value ? ' selected' : ''}>${h(value)}</option>`).join('');
-    }
-
     function renderEventsEditor(events) {
-        const list = events?.length ? events : [{ id: 'evt-1', title: '', timeLabel: '', summary: '', participants: [], memoryRole: '' }];
-        let maxId = 0;
-        list.forEach(e => {
-            const m = e.id?.match(/evt-(\d+)/);
-            if (m) maxId = Math.max(maxId, +m[1]);
-        });
-
-        const es = $('editor-struct');
-        setHtml(es, list.map(ev => {
-            const id = ev.id || `evt-${++maxId}`;
-            return `<div class="struct-item event-item" data-id="${h(id)}">
-                <div class="struct-row">
-                    <input type="text" class="event-title" placeholder="事件标题" value="${h(ev.title || '')}">
-                    <input type="text" class="event-time" placeholder="时间标签" value="${h(ev.timeLabel || '')}">
-                </div>
-                <div class="struct-row">
-                    <textarea class="event-summary" rows="2" placeholder="一句话描述">${h(ev.summary || '')}</textarea>
-                </div>
-                <div class="struct-row">
-                    <input type="text" class="event-participants" placeholder="人物（顿号分隔）" value="${h((ev.participants || []).join('、'))}">
-                </div>
-                <div class="struct-row">
-                    <label class="event-memory-role-field">记忆作用<select class="event-memory-role">${memoryRoleOptions(ev.memoryRole)}</select></label>
-                </div>
-                <div class="struct-actions"><span>ID：${h(id)}</span></div>
-            </div>`;
-        }).join('') + '<div style="margin-top:8px"><button type="button" class="btn btn-sm" id="event-add">＋ 新增事件</button></div>');
-
-        es.querySelectorAll('.event-item').forEach(addDeleteHandler);
-
-        $('event-add').onclick = () => {
-            let nmax = maxId;
-            es.querySelectorAll('.event-item').forEach(it => {
-                const m = it.dataset.id?.match(/evt-(\d+)/);
-                if (m) nmax = Math.max(nmax, +m[1]);
-            });
-            const nid = `evt-${nmax + 1}`;
-            const div = document.createElement('div');
-            div.className = 'struct-item event-item';
-            div.dataset.id = nid;
-            setHtml(div, `
-                <div class="struct-row"><input type="text" class="event-title" placeholder="事件标题"><input type="text" class="event-time" placeholder="时间标签"></div>
-                <div class="struct-row"><textarea class="event-summary" rows="2" placeholder="一句话描述"></textarea></div>
-                <div class="struct-row"><input type="text" class="event-participants" placeholder="人物（顿号分隔）"></div>
-                <div class="struct-row">
-                    <label class="event-memory-role-field">记忆作用<select class="event-memory-role">${memoryRoleOptions()}</select></label>
-                </div>
-                <div class="struct-actions"><span>ID：${h(nid)}</span></div>
-            `);
-            addDeleteHandler(div);
-            es.insertBefore(div, $('event-add').parentElement);
-        };
+        mountEventEditor($('editor-struct'), events);
     }
 
     function renderCharactersEditor(data) {
@@ -2215,9 +2177,12 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
             if (section === 'events') renderEventsEditor(summaryData.events || []);
             else if (section === 'characters') renderCharactersEditor(summaryData.characters || { main: [], relationships: [] });
             else if (section === 'arcs') renderArcsEditor(summaryData.arcs || []);
+            else if (section === 'profiles') profileEditor = mountProfileEditor(es, summaryData.profiles,
+                [...new Set([...(summaryData.characters?.main || []).map(getCharName), ...(summaryData.arcs || []).map(arc => arc.name)])]);
         }
 
         $('editor-modal').classList.add('active');
+        $('editor-modal').querySelector('.modal-body').scrollTop = 0;
         postMsg('EDITOR_OPENED');
     }
 
@@ -2240,12 +2205,15 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
                     const [text, weight] = line.split('|').map(s => s.trim());
                     return preserveAddedAt({ text: text || '', weight: weight || '一般' }, oldMap.get(text));
                 });
+            } else if (section === 'profiles') {
+                parsed = profileEditor.read();
             } else if (section === 'events') {
                 const oldMap = new Map((summaryData.events || []).map(e => [e.id, e]));
-                parsed = Array.from(es.querySelectorAll('.event-item')).map(it => {
+                parsed = Array.from(es.querySelectorAll('.event-item')).map((it, index) => {
                     const id = it.dataset.id;
                     return preserveAddedAt({
                         id,
+                        sortOrder: index,
                         title: it.querySelector('.event-title').value.trim(),
                         timeLabel: it.querySelector('.event-time').value.trim(),
                         summary: it.querySelector('.event-summary').value.trim(),
@@ -2322,13 +2290,14 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
             return;
         }
 
-        postMsg('UPDATE_SECTION', { section, data: parsed });
+        postMsg('UPDATE_SECTION', { section, data: parsed, chatId: currentTimelineChatId });
 
         if (section === 'keywords') renderKeywords(parsed);
         else if (section === 'events') { renderTimeline(parsed, { scrollMode: 'preserve' }); $('stat-events').textContent = parsed.length; }
         else if (section === 'characters') renderRelations(parsed);
         else if (section === 'arcs') renderArcs(parsed);
         else if (section === 'facts') renderFacts(parsed);
+        else if (section === 'profiles') renderBaseProfiles(parsed);
 
         closeEditor();
     }
@@ -2383,6 +2352,7 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
                     const p = d.payload;
                     const nextChatId = typeof p.chatId === 'string' ? p.chatId : '';
                     if (nextChatId !== currentTimelineChatId) {
+                        if (currentEditSection) closeEditor();
                         currentTimelineChatId = nextChatId;
                         timelineHasRenderedEvents = false;
                     }
@@ -2390,6 +2360,7 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
                     if (p.events) renderTimeline(p.events);
                     if (p.characters) renderRelations(p.characters);
                     if (p.arcs) renderArcs(p.arcs);
+                    renderBaseProfiles(p.profiles || []);
                     if (p.facts) renderFacts(p.facts);
                     $('stat-events').textContent = p.events?.length || 0;
                     if (p.lastSummarizedMesId != null) $('stat-summarized').textContent = p.lastSummarizedMesId + 1;
@@ -2407,13 +2378,15 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
                 $('stat-summarized').textContent = 0;
                 $('stat-pending').textContent = t;
                 $('summarized-count').textContent = 0;
-                summaryData = { keywords: [], events: [], characters: { main: [], relationships: [] }, arcs: [], facts: [] };
+                if (currentEditSection) closeEditor();
+                summaryData = { keywords: [], events: [], characters: { main: [], relationships: [] }, arcs: [], facts: [], profiles: [] };
                 currentTimelineChatId = '';
                 renderKeywords([]);
                 renderTimeline([]);
                 renderRelations(null);
                 renderArcs([]);
                 renderFacts([]);
+                renderBaseProfiles([]);
                 break;
             }
 
@@ -2578,6 +2551,25 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
     // Event Bindings
     // ═══════════════════════════════════════════════════════════════════════════
 
+    function renderBaseProfiles(profiles) {
+        summaryData.profiles = normalizeProfiles(profiles);
+        renderProfilesPanel($('base-profiles-list'), summaryData.profiles);
+        $('base-profiles-preview').textContent = '';
+    }
+
+    function syncInjectionControls() {
+        const atEnd = $('trigger-insert-at-end').checked;
+        const fixed = $('injection-mode').value === 'fixed';
+        $('injection-mode').disabled = atEnd;
+        $('injection-depth').disabled = atEnd || !fixed;
+        const injection = normalizeInjectionSettings({ injectionDepth: $('injection-depth').value });
+        $('injection-position-status').textContent = atEnd
+            ? '当前策略：聊天末尾，深度 0。固定深度暂不生效。'
+            : fixed ? `当前策略：距末尾 ${injection.injectionDepth} 条消息；聊天不足时放在最前。角色采用上方设置。`
+                : '当前策略：跟随总结 / 向量边界自动调整；浅层聊天限制在实际消息范围内。';
+        $('base-profiles-preview').textContent = '';
+    }
+
     function bindEvents() {
         // Section edit buttons
         $$('.sec-btn[data-section]').forEach(b => b.onclick = () => openEditor(b.dataset.section));
@@ -2590,6 +2582,19 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
 
         // Settings modal
         $('btn-settings').onclick = openSettings;
+        $('btn-injection-settings').onclick = () => {
+            openSettings();
+            document.querySelector('[data-tab="tab-summary"]')?.click();
+            $('memory-injection-settings').scrollIntoView({ block: 'center' });
+        };
+        $('injection-mode').addEventListener('change', syncInjectionControls);
+        $('injection-depth').addEventListener('input', syncInjectionControls);
+        $('trigger-insert-at-end').addEventListener('change', syncInjectionControls);
+        $('preview-base-profiles').onclick = () => {
+            const budget = normalizeInjectionSettings({ profileCharBudget: $('profile-char-budget').value }).profileCharBudget;
+            const preview = formatCharacterProfiles(summaryData.profiles, { maxChars: budget });
+            $('base-profiles-preview').textContent = `仅预览已保存的人物底稿，不代表本轮向量召回或完整最终提示词。\n独立预算 ${budget} 字符；输出 ${preview.text.length} 字符；省略 ${preview.omittedFields} 个字段。\n\n${preview.text || '暂无常驻基础档案。'}`;
+        };
         $('settings-backdrop').onclick = closeSettings;
         $('settings-close').onclick = closeSettings;
         $('settings-cancel').onclick = closeSettings;
@@ -2802,6 +2807,7 @@ import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './dat
         renderFacts([]);
 
         bindEvents();
+        renderBaseProfiles([]);
         syncCurrentChatSummaryControls(currentChatSummaryEnabled);
 
         // === THEME SWITCHER ===

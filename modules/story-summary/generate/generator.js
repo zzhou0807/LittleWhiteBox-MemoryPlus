@@ -154,6 +154,10 @@ export function formatExistingSummaryForAI(store) {
 
     const data = store.json;
     const parts = [];
+    if (data.profiles?.length) {
+        parts.push('【已有基础档案｜locked=true 的字段不得无依据改写】');
+        parts.push(JSON.stringify(data.profiles.map(profile => ({ name: profile.name, aliases: profile.aliases, fields: profile.fields }))));
+    }
 
     if (data.events?.length) {
         parts.push("【已记录事件】");

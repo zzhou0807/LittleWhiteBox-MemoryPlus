@@ -48,10 +48,13 @@ export function formatStorySummaryL2Events(events, {
     );
     if (budget <= 0) {return '';}
 
+    const hasManualOrder = events.some(event => Number.isFinite(event?.sortOrder));
     const candidates = events
         .map((event, index) => ({ event, index, boundary: eventBoundary(event), block: eventBlock(event) }))
         .filter(item => item.boundary !== null && item.boundary <= through && item.block)
-        .sort((left, right) => left.boundary - right.boundary || left.index - right.index);
+        .sort((left, right) => hasManualOrder
+            ? (left.event.sortOrder ?? left.index) - (right.event.sortOrder ?? right.index) || left.index - right.index
+            : left.boundary - right.boundary || left.index - right.index);
     const selected = [];
     let used = 0;
     for (let index = candidates.length - 1; index >= 0; index -= 1) {

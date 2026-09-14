@@ -4,6 +4,8 @@ import { xbLog } from "../../../core/debug-core.js";
 import { CommonSettingStorage } from "../../../core/server-storage.js";
 import { EVENT_MEMORY_ROLES } from "./events.js";
 import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './summary-delay.js';
+import { normalizeInjectionSettings } from './injection-settings.js';
+import { PROFILE_UPDATE_PROMPT } from './character-profiles.js';
 
 const MODULE_ID = "summaryConfig";
 const SUMMARY_CONFIG_KEY = "storySummaryPanelConfig";
@@ -260,7 +262,8 @@ Before generating, observe the USER and analyze carefully:
 
 ## Placeholder Notes
 - {$nextEventId} 会在运行时替换成实际起始事件编号，不要删除
-- {$existingEventCount}、{$historyRange} 这类占位符如果出现在你的自定义版本里，通常也不应该删除`;
+- {$existingEventCount}、{$historyRange} 这类占位符如果出现在你的自定义版本里，通常也不应该删除
+${PROFILE_UPDATE_PROMPT}`;
 
 export const DEFAULT_SUMMARY_ASSISTANT_CHECK_PROMPT = `Content review initiated...
 [Compliance Check Results]
@@ -436,6 +439,7 @@ function createDefaultSummaryPanelConfig() {
             wrapperHead: "",
             wrapperTail: "",
             forceInsertAtEnd: false,
+            ...normalizeInjectionSettings(),
         },
         ui: {
             hideSummarized: true,
@@ -520,6 +524,7 @@ function normalizeSummaryPanelConfig(rawConfig = null) {
     }
     if (result.trigger.useStream === undefined) result.trigger.useStream = true;
     result.trigger.delayFloors = normalizeSummaryDelayFloors(result.trigger.delayFloors);
+    Object.assign(result.trigger, normalizeInjectionSettings(result.trigger));
     result.ui.hideSummarized = !!result.ui.hideSummarized;
     result.ui.keepVisibleCount = clampKeepVisibleCount(result.ui.keepVisibleCount);
     result.ui.useVectorBoundary = result.ui.useVectorBoundary !== false;

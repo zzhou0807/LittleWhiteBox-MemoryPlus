@@ -22,6 +22,7 @@ import {
 import { isRelationFact, parseRelationTarget } from "./fact-predicates.js";
 import { projectSummaryEvent } from "./events.js";
 import { upgradeStoredEventMemoryRoles } from "./migrations/event-memory-role.js";
+import { mergeProfileUpdates, normalizeProfiles, reconcileProfileAliases } from "./character-profiles.js";
 
 const MODULE_ID = 'summaryStore';
 const FACTS_LIMIT_PER_SUBJECT = 10;
@@ -265,6 +266,13 @@ function normalizeSummaryJson(json) {
         }
     }
 
+    if (next.profiles != null) {
+        const profiles = normalizeProfiles(next.profiles);
+        if (JSON.stringify(profiles) !== JSON.stringify(next.profiles)) {
+            next.profiles = profiles;
+            changed = true;
+        }
+    }
     return { value: next, changed };
 }
 
@@ -644,8 +652,13 @@ export function mergeNewData(oldJson, parsed, endMesId, options = {}) {
         merged.keywords = incoming.keywords.map(k => ({ ...k, _addedAt: endMesId }));
     }
 
+    const hasManualOrder = merged.events.some(event => Number.isFinite(event.sortOrder));
+    let nextOrder = Math.max(-1, ...merged.events.map((event, index) => Number.isFinite(event.sortOrder) ? event.sortOrder : index)) + 1;
     (incoming.events || []).forEach(e => {
-        merged.events.push(projectSummaryEvent({ ...e, _addedAt: endMesId }));
+        const event = projectSummaryEvent({ ...e, _addedAt: endMesId });
+        if (hasManualOrder) event.sortOrder = nextOrder++;
+        else delete event.sortOrder;
+        merged.events.push(event);
     });
 
     // newCharacters
@@ -699,6 +712,11 @@ export function mergeNewData(oldJson, parsed, endMesId, options = {}) {
     merged.facts = mergeFacts(merged.facts, incoming.factUpdates || [], endMesId);
 
     const aliasResult = applyCharacterAliasUpdates(merged, incoming.characterAliasUpdates || [], endMesId);
+    if (merged.profiles?.length || incoming.profileUpdates?.length) {
+        aliasResult.json.profiles = mergeProfileUpdates(
+            merged.profiles, incoming.profileUpdates, endMesId, aliasResult.json.characterAliases,
+        );
+    }
     const undo = buildSummaryUndo(beforeJson, aliasResult.json, {
         aliasChanged: aliasResult.aliasChanged,
     });
@@ -781,10 +799,11 @@ function hasSummaryContent(json) {
         || (json.arcs || []).length > 0
         || (json.facts || []).length > 0
         || (json.characterAliases || []).length > 0
+        || (json.profiles || []).length > 0
     );
     if (hasKnownContent) return true;
 
-    const knownFields = new Set(['keywords', 'events', 'characters', 'arcs', 'facts', 'characterAliases']);
+    const knownFields = new Set(['keywords', 'events', 'characters', 'arcs', 'facts', 'characterAliases', 'profiles']);
     if (Object.keys(json).some(field => !knownFields.has(field))) return true;
     return isPlainObject(json.characters)
         && Object.keys(json.characters).some(field => field !== 'main');
@@ -827,7 +846,9 @@ export async function executeRollback(chatId, store, targetEndMesId) {
             );
         }
         json.facts = (json.facts || []).filter(f => (f._addedAt ?? 0) <= targetEndMesId);
+        const preservedProfiles = json.profiles;
         if (targetEndMesId < 0) json = {};
+        if (preservedProfiles?.length) json.profiles = reconcileProfileAliases(preservedProfiles, json.characterAliases);
     }
 
     const retainedEventIds = new Set((json.events || []).map(event => event?.id).filter(Boolean));

@@ -1,0 +1,84 @@
+.memory-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+#editor-struct > .memory-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 10px 0;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--bdr);
+    margin-bottom: 10px;
+}
+
+.memory-search { flex: 1 1 180px; min-width: 120px; }
+.memory-search,
+.memory-event input,
+.memory-event textarea,
+.memory-event select,
+.memory-profile-body input[type="text"],
+.memory-profile-field textarea {
+    background: var(--bg2);
+    color: var(--txt);
+    border: 1px solid var(--bdr2);
+    border-radius: 6px;
+    padding: 9px 10px;
+    font: inherit;
+    font-size: .82rem;
+    line-height: 1.6;
+    min-width: 0;
+}
+.memory-search::placeholder,
+.memory-event input::placeholder,
+.memory-event textarea::placeholder,
+.memory-profile-field textarea::placeholder { color: var(--txt3); opacity: 1; }
+.memory-muted { color: var(--txt3); font-size: .78rem; line-height: 1.65; }
+.memory-check { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; cursor: pointer; }
+.memory-check input { accent-color: var(--acc); width: auto; }
+.memory-event { display: grid; gap: 10px; }
+.memory-event [disabled] { opacity: .4; cursor: not-allowed; }
+.memory-event .event-number { margin-right: auto; }
+.memory-event textarea, .memory-event > input { width: 100%; }
+.memory-event .struct-actions { justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.memory-profiles { flex: 0 0 auto; }
+.memory-profiles-list { max-height: 360px; overflow-y: auto; }
+.memory-profile-preview { border: 1px solid var(--bdr); border-radius: 10px; padding: 12px; margin: 8px 0; }
+.memory-profile-preview summary, .memory-profile-editor > summary { cursor: pointer; font-weight: 600; line-height: 1.7; }
+.memory-badge { font-size: .7rem; font-weight: 400; color: var(--acc); background: var(--bg3); border-radius: 20px; padding: 3px 8px; margin-left: 8px; }
+.memory-profile-line { display: grid; gap: 4px; margin-top: 12px; font-size: .82rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-profile-line strong { color: var(--txt3); font-size: .72rem; }
+.memory-profile-body { display: grid; gap: 14px; padding-top: 12px; }
+.memory-profile-field { padding: 12px; border: 1px solid var(--bdr); border-radius: 8px; background: var(--bg3); }
+.memory-profile-field .memory-toolbar { justify-content: space-between; margin-bottom: 8px; font-size: .85rem; }
+.memory-profile-field textarea { width: 100%; min-height: 64px; line-height: 1.7; resize: vertical; }
+.memory-profile-field small { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 5px; }
+.memory-candidates { border: 1px solid var(--acc); border-radius: 10px; padding: 14px; }
+.memory-candidates h3 { font-size: .95rem; }
+.memory-candidate { padding: 12px 0; border-bottom: 1px solid var(--bdr); font-size: .82rem; }
+.memory-candidate p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; line-height: 1.6; }
+.memory-candidate button + button { margin-left: 8px; }
+.memory-before { color: var(--txt3); }
+.memory-after { color: var(--acc); }
+.memory-history { color: var(--txt3); font-size: .78rem; }
+.memory-history summary { cursor: pointer; }
+.memory-history p { white-space: pre-wrap; overflow-wrap: anywhere; border-bottom: 1px solid var(--bdr); padding: 10px 0; }
+.memory-history[open] { max-height: 320px; overflow-y: auto; }
+.memory-injection-options { border: 1px solid var(--bdr); border-radius: 10px; padding: 14px; margin: 16px 0; }
+.memory-injection-options h3 { font-size: .95rem; margin-bottom: 12px; }
+.memory-injection-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; font-family: inherit; font-size: .78rem; line-height: 1.7; background: var(--bg3); padding: 12px; border-radius: 8px; margin-top: 10px; }
+.memory-save-status { margin-right: auto; font-size: .78rem; color: var(--acc); max-width: 55%; }
+.memory-save-status.error { color: var(--hl); }
+.memory-injection-preview:empty { display: none; }
+#editor-struct [hidden] { display: none !important; }
+#editor-struct :focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+@media (max-width: 600px) {
+    .memory-toolbar .btn { min-height: 36px; padding: 7px 10px; }
+    .memory-profile-body .struct-row { flex-direction: column; }
+    .memory-search { flex-basis: 100%; }
+    .memory-event .struct-actions { justify-content: flex-start; }
+    .memory-profile-field { padding: 9px; }
+}

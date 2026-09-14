@@ -16,6 +16,7 @@ import { getContext } from "../../../../../../extensions.js";
 import { xbLog } from "../../../core/debug-core.js";
 import { getSummaryStore, getFacts } from "../data/store.js";
 import { isRelationFact } from "../data/fact-predicates.js";
+import { orderSummaryEvents } from "../data/events.js";
 import { getVectorConfig, getSummaryPanelConfig, getSettings, DEFAULT_MEMORY_PROMPT_TEMPLATE } from "../data/config.js";
 import {
     hydrateSelectedDirectEvidence,
@@ -168,6 +169,7 @@ function shouldKeepEvidenceL0(l0, focusSet) {
  * @returns {number} 排序键
  */
 function getEventSortKey(event) {
+    if (Number.isFinite(event?.sortOrder)) return event.sortOrder;
     const r = parseEventRange(event?.summary);
     if (r) return r.start;
     const m = String(event?.id || "").match(/evt-(\d+)/);
@@ -846,7 +848,7 @@ function buildNonVectorPrompt(store) {
 
     // [Events] L2 Events
     if (data.events?.length) {
-        const lines = data.events.map((ev, i) => {
+        const lines = orderSummaryEvents(data.events).map((ev, i) => {
             const time = ev.timeLabel || "";
             const title = ev.title || "";
             const people = (ev.participants || []).join(" / ");
