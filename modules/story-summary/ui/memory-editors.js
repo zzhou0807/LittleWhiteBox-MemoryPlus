@@ -34,6 +34,20 @@ function checkbox(label, checked) {
     return { wrapper, control };
 }
 
+// 明文 http 页面属于非安全上下文，浏览器不会暴露 window.crypto；
+// 不能直接使用 crypto.randomUUID，否则点击按钮会静默抛错。
+function uniqueId(prefix) {
+    const source = globalThis.crypto;
+    if (source && typeof source.randomUUID === 'function') {
+        try {
+            return `${prefix}-${source.randomUUID()}`;
+        } catch {
+            // 继续走下面的兜底
+        }
+    }
+    return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function mountEventEditor(container, rawEvents = []) {
     const events = orderSummaryEvents(rawEvents);
     container.replaceChildren();
@@ -157,9 +171,24 @@ export function renderProfilesPanel(container, rawProfiles) {
 export function mountProfileEditor(container, rawProfiles, knownNames = []) {
     container.replaceChildren();
     const toolbar = element('div', 'memory-toolbar');
+    const status = element('span', 'memory-muted memory-editor-status');
     const search = input('memory-search', '按角色名或别名搜索');
     const cards = element('div', 'memory-profile-list');
     const states = new Map();
+    const say = (message, isError = false) => {
+        status.textContent = message || '';
+        status.classList.toggle('error', Boolean(isError));
+    };
+    // 点击必须留下反馈：静默失败看起来就像按钮坏了。
+    const guard = action => () => {
+        try {
+            say('');
+            action();
+        } catch (error) {
+            say(`操作失败：${error?.message || error}`, true);
+            console.error('[story-summary] 人物基础档案操作失败', error);
+        }
+    };
     const refresh = () => {
         for (const card of cards.children) {
             card.hidden = ![card.querySelector('.profile-name').value, card.querySelector('.profile-aliases').value]
@@ -255,7 +284,7 @@ export function mountProfileEditor(container, rawProfiles, knownNames = []) {
         return card;
     }
     const add = name => {
-        const id = `person-${globalThis.crypto.randomUUID()}`;
+        const id = uniqueId('person');
         const card = createCard({ id, name, fields: {} });
         cards.append(card);
         search.value = '';
@@ -263,15 +292,20 @@ export function mountProfileEditor(container, rawProfiles, knownNames = []) {
         card.querySelector('.profile-name').focus();
     };
     const existingProfiles = normalizeProfiles(rawProfiles);
-    toolbar.append(search, button('＋ 新建人物', () => add('新角色')), button('补齐主要人物空白档案', () => {
+    toolbar.append(search, button('＋ 新建人物', guard(() => add('新角色'))), button('补齐主要人物空白档案', guard(() => {
         const names = new Set([...cards.children].map(card => readCard(card).name.toLowerCase()));
+        let added = 0;
         for (const name of knownNames) {
             if (!name || names.has(name.toLowerCase())) continue;
             add(name);
             names.add(name.toLowerCase());
+            added += 1;
         }
-    }));
-    container.append(toolbar, cards);
+        if (added) say(`已补齐 ${added} 个空白档案，填写后点击“保存”才会写入。`);
+        else if (knownNames.length) say('主要人物都已有档案，无需补齐。');
+        else say('暂时没有可用的人物名：可先在“关系与成长”里记录登场角色，或用“＋ 新建人物”手动添加。');
+    })));
+    container.append(toolbar, status, cards);
     existingProfiles.forEach((profile, index) => {
         const card = createCard(profile);
         card.open = index === 0;

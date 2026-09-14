@@ -93,6 +93,27 @@ test('profile editor rejects duplicate names and can undo removal', () => {
     assert.equal(editor.read().length, 2);
 });
 
+test('新建人物与补齐在没有 window.crypto 的明文 http 页面依然可用', () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    Object.defineProperty(globalThis, 'crypto', { value: undefined, configurable: true, writable: true });
+    try {
+        const editor = mountProfileEditor(container, normalizeProfiles([{ id: 'p1', name: '甲' }]), ['甲', '乙']);
+        click(container, '＋ 新建人物');
+        click(container, '补齐主要人物空白档案');
+        assert.deepEqual(editor.read().map(profile => profile.name), ['甲', '新角色', '乙']);
+        assert.equal(container.querySelector('.memory-editor-status').classList.contains('error'), false);
+    } finally {
+        if (original) Object.defineProperty(globalThis, 'crypto', original);
+        else delete globalThis.crypto;
+    }
+});
+
+test('补齐没有可用人物名时给出提示，而不是静默无反应', () => {
+    mountProfileEditor(container, [], []);
+    click(container, '补齐主要人物空白档案');
+    assert.match(container.querySelector('.memory-editor-status').textContent, /暂时没有可用的人物名/);
+});
+
 test('untrusted profile and event text never becomes executable markup', () => {
     const malicious = '<img src=x onerror=alert(1)><script>alert(2)</script>';
     renderProfilesPanel(container, [{ name: malicious, fields: { personality: malicious } }]);
