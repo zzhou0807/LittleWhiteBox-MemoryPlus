@@ -3,7 +3,7 @@ $root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $workspace = [System.IO.Path]::GetFullPath((Join-Path $root '..'))
 $output = Join-Path $workspace 'LittleWhiteBox-delivery'
 New-Item -ItemType Directory -Path $output -Force | Out-Null
-$archivePath = Join-Path $output 'LittleWhiteBox-MemoryPlus-3.1.2-memory.1.zip'
+$archivePath = Join-Path $output 'LittleWhiteBox-MemoryPlus-3.1.3-memory.3.zip'
 $excluded = @('summary-test-results.txt', 'summary-build-results.txt', 'summary-runtime-results.txt', 'summary-lint-results.txt')
 $safeRoot = $root.Replace('\', '/')
 $files = & git -C $root -c "safe.directory=$safeRoot" -c core.quotepath=false ls-files --cached --others --exclude-standard

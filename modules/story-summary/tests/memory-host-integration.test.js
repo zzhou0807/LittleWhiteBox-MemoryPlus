@@ -7,6 +7,7 @@ import { parse } from 'acorn';
 import { normalizeEventMemoryRole, projectSummaryEvent } from '../data/events.js';
 import { formatCharacterProfiles, mergeProfileUpdates, normalizeProfiles, reconcileProfileAliases } from '../data/character-profiles.js';
 import { normalizeInjectionSettings, resolveSummaryInjection } from '../data/injection-settings.js';
+import { formatWorldLore, mergeLoreUpdates, normalizeLore, reconcileLoreAliases } from '../data/world-lore.js';
 import { applyCharacterAliasUpdates, canonicalizeIncrementalSummaryData, normalizeCharacterAliases } from '../data/character-aliases.js';
 import { buildSummaryUndo } from '../data/summary-undo.js';
 import { isRelationFact } from '../data/fact-predicates.js';
@@ -23,7 +24,7 @@ async function loadFunctions(file, names, dependencies) {
 }
 
 const makeProfiles = () => normalizeProfiles([{ id: 'p1', name: '旅人', fields: { personality: '谨慎', motivation: '编写图鉴' } }]);
-const portableDependencies = { normalizeProfiles, normalizeCharacterAliases, normalizeEventMemoryRole, formatCharacterProfiles };
+const portableDependencies = { normalizeProfiles, normalizeLore, normalizeCharacterAliases, normalizeEventMemoryRole, formatCharacterProfiles };
 const portable = await loadFunctions('../story-summary.js', [
     'cloneSummaryJsonForPortability', 'stripFloorMarker', 'normalizeInternalFact', 'normalizePortableFact',
     'extractSummaryImportJson', 'stampImportedSummaryJson', 'serializePortableFact', 'buildSummaryExportPackage',
@@ -59,7 +60,7 @@ test('legacy packages import with an empty optional profile panel', () => {
     assert.equal(portable.extractSummaryImportJson({ profiles: makeProfiles() }).profiles.length, 1);
 });
 
-async function prepare({ vector = false, boundary = 9, length = 15, trigger = {}, profiles = makeProfiles(), aborted = false } = {}) {
+async function prepare({ vector = false, boundary = 9, length = 15, trigger = {}, profiles = makeProfiles(), lore = [], aborted = false } = {}) {
     let vectorCalls = 0;
     let nonVectorCalls = 0;
     const dependencies = {
@@ -68,10 +69,10 @@ async function prepare({ vector = false, boundary = 9, length = 15, trigger = {}
         getVectorConfig: () => ({ enabled: vector }),
         isTokenizerReady: () => true,
         getContext: () => ({ chatId: 'fixture-chat', chat: Array.from({ length }, () => ({ mes: 'test' })) }),
-        getSummaryStore: () => ({ json: { profiles }, lastSummarizedMesId: boundary }),
+        getSummaryStore: () => ({ json: { profiles, lore }, lastSummarizedMesId: boundary }),
         getMeta: async () => ({ lastChunkFloor: boundary }),
         getSummaryPanelConfig: () => ({ trigger }),
-        formatCharacterProfiles, normalizeInjectionSettings, resolveSummaryInjection,
+        formatCharacterProfiles, formatWorldLore, normalizeInjectionSettings, resolveSummaryInjection,
         buildVectorPromptText: async () => { vectorCalls++; return { text: '向量召回的事件', logText: '测试召回' }; },
         buildNonVectorPromptText: () => { nonVectorCalls++; return '完整剧情记忆'; },
         ROLE_MAP: { system: 0, user: 1, assistant: 2 },
@@ -126,6 +127,7 @@ const storeFunctions = await loadFunctions('../data/store.js', [
     FACTS_LIMIT_PER_SUBJECT: 10,
     canonicalizeIncrementalSummaryData, projectSummaryEvent, applyCharacterAliasUpdates,
     mergeProfileUpdates, normalizeProfiles, reconcileProfileAliases, buildSummaryUndo, isRelationFact,
+    mergeLoreUpdates, reconcileLoreAliases,
 });
 
 test('actual store merge appends generated events after manual order and protects profiles across batches', () => {
@@ -145,4 +147,43 @@ test('actual store merge appends generated events after manual order and protect
     const next = storeFunctions.mergeNewData(after.json, { keywords: [{ text: '旅行', weight: '核心' }] }, 30);
     assert.equal(next.profiles[0].fields.motivation.value, '编写图鉴');
     assert.equal(next.profiles[0].candidates.length, 1);
+});
+
+test('actual store merge keeps locked world lore and queues conflicting settings for review', () => {
+    const before = {
+        lore: mergeLoreUpdates(normalizeLore([{
+            id: 'lore-1', name: '药谷', category: 'city', fields: { rules: { value: '雾气会放大气味', evidence: '虚构设定卡' } },
+        }]), [], 9),
+    };
+    const after = storeFunctions.mergeNewData(before, {
+        loreUpdates: [
+            { name: '药谷', fields: { details: { value: '谷口有一座废弃哨塔', evidence: '#12 原文描述' } } },
+            { name: '药谷', category: 'city', fields: { rules: { value: '雾气会让人忘记来路', evidence: '#13 传闻' } } },
+        ],
+    }, 20, { returnMeta: true });
+    assert.equal(after.json.lore.length, 1);
+    assert.equal(after.json.lore[0].category, 'city');
+    assert.equal(after.json.lore[0].fields.rules.value, '雾气会放大气味');
+    assert.equal(after.json.lore[0].fields.details.value, '谷口有一座废弃哨塔');
+    assert.equal(after.json.lore[0].candidates.length, 1);
+    assert.equal(after.json.lore[0].candidates[0].sourceFloor, 20);
+    assert.ok(after.undo.loreChanges);
+});
+
+test('actual prepare path injects resident world lore before the summary body', async () => {
+    const lore = mergeLoreUpdates(normalizeLore([{
+        id: 'lore-1', name: '药谷', category: 'city', fields: { rules: { value: '雾气会放大气味', evidence: '虚构设定卡' } },
+    }]), [], 9);
+    const { result } = await prepare({ lore });
+    assert.match(result.text, /【世界观设定｜固定设定】/);
+    assert.match(result.text, /雾气会放大气味[\s\S]*完整剧情记忆/);
+});
+
+test('world lore budget overflow is reported by the actual host prepare path', async () => {
+    const lore = normalizeLore([{
+        id: 'lore-1', name: '药谷', category: 'city', fields: { details: { value: '设定'.repeat(1200), evidence: '虚构设定卡' } },
+    }]);
+    const { result } = await prepare({ lore, trigger: { loreCharBudget: 1000 } });
+    assert.equal(result.notice.issueCode, 'lore_budget');
+    assert.doesNotMatch(result.text, /设定设定/);
 });

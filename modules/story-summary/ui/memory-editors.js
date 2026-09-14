@@ -1,5 +1,6 @@
 import { EVENT_MEMORY_ROLES, orderSummaryEvents } from '../data/events.js';
 import { normalizeProfiles, PROFILE_FIELDS, resolveProfileCandidate } from '../data/character-profiles.js';
+import { LORE_CATEGORIES, LORE_FIELDS, normalizeLore, resolveLoreCandidate } from '../data/world-lore.js';
 
 function element(tag, className = '', content = '') {
     const node = document.createElement(tag);
@@ -168,6 +169,31 @@ export function renderProfilesPanel(container, rawProfiles) {
     }
 }
 
+export function renderLorePanel(container, rawLore) {
+    const entries = normalizeLore(rawLore);
+    container.replaceChildren();
+    if (!entries.length) {
+        container.append(element('p', 'empty', '还没有世界观设定。可手动补录剧情中出现的城市、物品、药水或魔法规则；后续总结也会提取有依据的设定。一次性道具与临时场景不会被写成固定设定。'));
+        return;
+    }
+    for (const entry of entries) {
+        const card = element('details', 'memory-profile-preview');
+        const summary = element('summary', '', entry.name);
+        summary.append(element('span', 'memory-badge', `${LORE_CATEGORIES[entry.category]} · ${entry.pinned ? '常驻' : '不注入'}${entry.candidates.length ? ` · ${entry.candidates.length} 待审` : ''}`));
+        card.append(summary);
+        let hasFields = false;
+        for (const [key, label] of Object.entries(LORE_FIELDS)) {
+            if (!entry.fields[key].value) continue;
+            hasFields = true;
+            const line = element('p', 'memory-profile-line');
+            line.append(element('strong', '', `${label}${entry.fields[key].locked ? ' · 已锁定' : ''}`), element('span', '', entry.fields[key].value));
+            card.append(line);
+        }
+        if (!hasFields) card.append(element('p', 'memory-muted', '空白设定：请补充确定的规则或描述，不需要填写未知信息。'));
+        container.append(card);
+    }
+}
+
 export function mountProfileEditor(container, rawProfiles, knownNames = []) {
     container.replaceChildren();
     const toolbar = element('div', 'memory-toolbar');
@@ -322,6 +348,158 @@ export function mountProfileEditor(container, rawProfiles, knownNames = []) {
                 names.add(profile.name.toLowerCase());
             }
             return normalizeProfiles(result);
+        },
+    };
+}
+
+export function mountLoreEditor(container, rawLore) {
+    container.replaceChildren();
+    const toolbar = element('div', 'memory-toolbar');
+    const status = element('span', 'memory-muted memory-editor-status');
+    const search = input('memory-search', '按名称或别名搜索');
+    const cards = element('div', 'memory-profile-list');
+    const states = new Map();
+    const say = (message, isError = false) => {
+        status.textContent = message || '';
+        status.classList.toggle('error', Boolean(isError));
+    };
+    const guard = action => () => {
+        try {
+            say('');
+            action();
+        } catch (error) {
+            say(`操作失败：${error?.message || error}`, true);
+            console.error('[story-summary] 世界观设定操作失败', error);
+        }
+    };
+    const refresh = () => {
+        for (const card of cards.children) {
+            card.hidden = ![card.querySelector('.lore-name').value, card.querySelector('.lore-aliases').value]
+                .join(' ').toLowerCase().includes(search.value.toLowerCase().trim());
+        }
+    };
+    function readCard(card) {
+        const entry = structuredClone(states.get(card));
+        entry.name = card.querySelector('.lore-name').value.trim();
+        entry.aliases = card.querySelector('.lore-aliases').value.split(/[,、，]/).map(name => name.trim()).filter(Boolean);
+        entry.category = card.querySelector('.lore-category').value;
+        entry.pinned = card.querySelector('.lore-pinned').checked;
+        for (const key of Object.keys(LORE_FIELDS)) {
+            entry.fields[key].value = card.querySelector(`[data-field="${key}"] textarea`).value.trim();
+            entry.fields[key].locked = card.querySelector(`[data-field="${key}"] input`).checked;
+        }
+        return entry;
+    }
+    function createCard(rawEntry) {
+        const entry = normalizeLore([rawEntry])[0];
+        const card = element('details', 'struct-item memory-profile-editor');
+        card.open = true;
+        states.set(card, entry);
+        const heading = element('summary', '', entry.name);
+        const name = input('lore-name', '设定名称（必填）', entry.name);
+        name.maxLength = 160;
+        name.oninput = () => { heading.textContent = name.value || '未命名设定'; };
+        const aliases = input('lore-aliases', '别名（顿号分隔）', entry.aliases.join('、'));
+        const category = element('select', 'lore-category');
+        category.setAttribute('aria-label', '设定类别');
+        for (const [value, label] of Object.entries(LORE_CATEGORIES)) {
+            const option = element('option', '', label);
+            option.value = value;
+            category.append(option);
+        }
+        category.value = entry.category;
+        const pinned = checkbox('常驻注入（不依赖向量召回）', entry.pinned);
+        pinned.control.className = 'lore-pinned';
+        const row = element('div', 'struct-row');
+        row.append(name, aliases);
+        const content = element('div', 'memory-profile-body');
+        content.append(row, category, pinned.wrapper);
+        for (const [key, label] of Object.entries(LORE_FIELDS)) {
+            const field = entry.fields[key];
+            const group = element('div', 'memory-profile-field');
+            group.dataset.field = key;
+            const fieldHead = element('div', 'memory-toolbar');
+            const lock = checkbox('锁定', field.locked);
+            lock.control.setAttribute('aria-label', `${label}锁定`);
+            fieldHead.append(element('strong', '', label), lock.wrapper);
+            const value = input('', `${label}：仅填写有依据的稳定设定`, field.value, true);
+            value.maxLength = 4000;
+            group.append(fieldHead, value);
+            if (field.evidence) group.append(element('small', 'memory-muted', `依据${field.sourceFloor == null ? '' : ` #${field.sourceFloor}`}：${field.evidence}`));
+            content.append(group);
+        }
+        if (entry.candidates.length) {
+            const review = element('section', 'memory-candidates');
+            review.append(element('h3', '', `待审核更新 · ${entry.candidates.length}`), element('p', 'memory-muted', '锁定字段未被覆盖。接受后保存才会替换底稿；拒绝相同建议后不再重复提出。'));
+            entry.candidates.forEach((candidate, index) => {
+                const item = element('div', 'memory-candidate');
+                item.append(
+                    element('strong', '', LORE_FIELDS[candidate.field]),
+                    element('p', 'memory-before', `当前：${entry.fields[candidate.field].value || '未填写'}`),
+                    element('p', 'memory-after', `建议：${candidate.value}`),
+                    element('p', 'memory-muted', `依据${candidate.sourceFloor == null ? '' : ` #${candidate.sourceFloor}`}：${candidate.evidence || '未提供'}`),
+                );
+                const resolve = accept => {
+                    const edited = readCard(card);
+                    if (!edited.name) {
+                        name.reportValidity?.();
+                        name.focus();
+                        return;
+                    }
+                    const next = resolveLoreCandidate(edited, index, accept);
+                    const replacement = createCard(next);
+                    card.replaceWith(replacement);
+                    states.delete(card);
+                };
+                item.append(button('接受并锁定', () => resolve(true)), button('拒绝建议', () => resolve(false)));
+                review.append(item);
+            });
+            content.append(review);
+        }
+        const history = element('details', 'memory-history');
+        history.append(element('summary', '', `修改记录 · ${entry.history.length}（保留最近 200 条）`));
+        const actionLabels = { manual: '手动编辑', accepted: '已接受', rejected: '已拒绝', automatic: '自动补充' };
+        [...entry.history].reverse().forEach(item => {
+            history.append(element('p', '', `${actionLabels[item.action]} · ${LORE_FIELDS[item.field]}${item.sourceFloor == null ? '' : ` · #${item.sourceFloor}`}\n${item.previous || '空白'} → ${item.value || '空白'}\n${item.evidence}`));
+        });
+        content.append(history, button('删除设定', () => {
+            const previousNext = card.nextSibling;
+            card.remove();
+            const undo = button(`恢复「${entry.name}」`, () => {
+                cards.insertBefore(card, previousNext?.parentNode === cards ? previousNext : null);
+                undo.remove();
+                refresh();
+            });
+            toolbar.append(undo);
+        }, 'btn btn-sm btn-del'));
+        card.append(heading, content);
+        return card;
+    }
+    const add = name => {
+        const card = createCard({ id: uniqueId('lore'), name, fields: {} });
+        cards.append(card);
+        search.value = '';
+        refresh();
+        card.querySelector('.lore-name').focus();
+    };
+    toolbar.append(search, button('＋ 新建设定', guard(() => add('新设定'))), status);
+    container.append(toolbar, status, cards);
+    normalizeLore(rawLore).forEach((entry, index) => {
+        const card = createCard(entry);
+        card.open = index === 0;
+        cards.append(card);
+    });
+    search.oninput = refresh;
+    return {
+        read() {
+            const result = [...cards.children].map(readCard);
+            const names = new Set();
+            for (const entry of result) {
+                if (!entry.name) throw new Error('设定名称不能为空');
+                if (names.has(entry.name.toLowerCase())) throw new Error(`重复设定名称：${entry.name}`);
+                names.add(entry.name.toLowerCase());
+            }
+            return normalizeLore(result);
         },
     };
 }

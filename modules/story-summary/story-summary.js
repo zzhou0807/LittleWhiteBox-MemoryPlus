@@ -73,6 +73,7 @@ import { normalizeCharacterAliases } from "./data/character-aliases.js";
 import { stampEditedCharacters } from "./data/character-edits.js";
 import { normalizeEventMemoryRole, stampEditedSummaryEvents } from "./data/events.js";
 import { formatCharacterProfiles, normalizeProfiles, reconcileProfileAliases, stampEditedProfiles } from "./data/character-profiles.js";
+import { formatWorldLore, normalizeLore, reconcileLoreAliases, stampEditedLore } from "./data/world-lore.js";
 import { normalizeInjectionSettings, resolveSummaryInjection } from "./data/injection-settings.js";
 import { isRelationFact, parseRelationTarget } from "./data/fact-predicates.js";
 import { formatStorySummaryL2Events } from "./prompt-events.js";
@@ -186,7 +187,7 @@ import { invalidateLexicalIndex, warmupIndex, removeDocumentsByFloor, addEventDo
 const MODULE_ID = "storySummary";
 const messageButtonOwnership = createMessageButtonOwnership();
 const iframePath = `${extensionFolderPath}/modules/story-summary/story-summary.html`;
-const VALID_SECTIONS = ["keywords", "events", "characters", "arcs", "facts", "profiles"];
+const VALID_SECTIONS = ["keywords", "events", "characters", "arcs", "facts", "profiles", "lore"];
 const MESSAGE_EVENT = "message";
 const SUMMARY_MODEL_FETCH_PROVIDERS = new Set(["openai"]);
 const SUMMARY_MODEL_FETCH_TIMEOUT_MS = 5000;
@@ -2233,6 +2234,7 @@ function buildFramePayload(store) {
         },
         arcs: json.arcs || [],
         profiles: normalizeProfiles(json.profiles),
+        lore: normalizeLore(json.lore),
         facts,
         lastSummarizedMesId: store?.lastSummarizedMesId ?? -1,
     };
@@ -2400,6 +2402,13 @@ function cloneSummaryJsonForPortability(json) {
             candidates: profile.candidates.map(candidate => ({ ...candidate, sourceFloor: null })),
             history: profile.history.map(entry => ({ ...entry, sourceFloor: null })),
         })),
+        lore: normalizeLore(src.lore).map(entry => ({
+            ...entry,
+            _addedAt: 0,
+            fields: Object.fromEntries(Object.entries(entry.fields).map(([key, field]) => [key, { ...field, sourceFloor: null }])),
+            candidates: entry.candidates.map(candidate => ({ ...candidate, sourceFloor: null })),
+            history: entry.history.map(item => ({ ...item, sourceFloor: null })),
+        })),
         facts: Array.isArray(src.facts)
             ? src.facts.map(normalizeInternalFact).filter((item) => item.s && item.p && item.o)
             : [],
@@ -2422,6 +2431,7 @@ function extractSummaryImportJson(raw) {
         Array.isArray(candidate.events) ||
         Array.isArray(candidate.arcs) ||
         Array.isArray(candidate.profiles) ||
+        Array.isArray(candidate.lore) ||
         Array.isArray(candidate.facts) ||
         (candidate.characters && typeof candidate.characters === "object");
 
@@ -2454,6 +2464,7 @@ function buildSummaryExportPackage(store) {
             aliases: json.characterAliases.length,
             arcs: json.arcs.length,
             profiles: json.profiles.length,
+            lore: json.lore.length,
             facts: json.facts.length,
         },
     };
@@ -2545,7 +2556,8 @@ function formatStorySummaryMemoryText(store) {
         .filter(Boolean));
 
     const profiles = formatCharacterProfiles(json.profiles, { maxChars: Number.MAX_SAFE_INTEGER });
-    return [profiles.text, lines.join("\n").trim()].filter(Boolean).join("\n\n");
+    const lore = formatWorldLore(json.lore, { maxChars: Number.MAX_SAFE_INTEGER });
+    return [profiles.text, lore.text, lines.join("\n").trim()].filter(Boolean).join("\n\n");
 }
 
 function stampImportedSummaryJson(json, boundary) {
@@ -2561,6 +2573,7 @@ function stampImportedSummaryJson(json, boundary) {
         if (item && typeof item === "object") item._addedAt = boundary;
     }
     for (const profile of (json.profiles || [])) profile._addedAt = boundary;
+    for (const entry of (json.lore || [])) entry._addedAt = boundary;
 
     const mainCharacters = json.characters?.main || [];
     for (const item of mainCharacters) {
@@ -3574,6 +3587,10 @@ async function handleFrameMessage(event) {
                 store.json.profiles = reconcileProfileAliases(
                     stampEditedProfiles(store.json.profiles, data.data, getCurrentFloorHint()), store.json.characterAliases,
                 );
+            } else if (data.section === "lore") {
+                store.json.lore = reconcileLoreAliases(
+                    stampEditedLore(store.json.lore, data.data, getCurrentFloorHint()),
+                );
             } else if (VALID_SECTIONS.includes(data.section)) {
                 store.json[data.section] = data.section === "characters"
                     ? stampEditedCharacters(store.json.characters, data.data, getCurrentFloorHint())
@@ -4196,7 +4213,8 @@ async function prepareMemoryPrompt(type, signal) {
     timing.boundary = Math.round(performance.now() - T_Boundary);
     const cfg = getSummaryPanelConfig();
     const profiles = formatCharacterProfiles(store?.json?.profiles, { maxChars: normalizeInjectionSettings(cfg.trigger).profileCharBudget });
-    if (boundary < 0 && !profiles.text) {
+    const lore = formatWorldLore(store?.json?.lore, { maxChars: normalizeInjectionSettings(cfg.trigger).loreCharBudget });
+    if (boundary < 0 && !profiles.text && !lore.text) {
         return finish('no_boundary');
     }
 
@@ -4228,9 +4246,12 @@ async function prepareMemoryPrompt(type, signal) {
         text = buildNonVectorPromptText() || "";
     }
     timing.buildPrompt = Math.round(performance.now() - T_BuildPrompt);
-    text = [profiles.text, text].filter(Boolean).join('\n\n');
+    text = [profiles.text, lore.text, text].filter(Boolean).join('\n\n');
     if (profiles.omittedFields) {
         notice ||= { message: `人物基础档案有 ${profiles.omittedFields} 个字段超出注入字数预算，请在总结设置中提高预算或取消次要人物的常驻。`, issueCode: 'profile_budget' };
+    }
+    if (lore.omittedFields) {
+        notice ||= { message: `世界观设定有 ${lore.omittedFields} 个字段超出注入字数预算，请在总结设置中提高预算或取消次要设定的常驻。`, issueCode: 'lore_budget' };
     }
 
     // 获取用户配置的 role

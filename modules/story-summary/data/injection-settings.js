@@ -1,11 +1,13 @@
 export function normalizeInjectionSettings(trigger = {}) {
     const depth = trigger.injectionDepth == null || trigger.injectionDepth === '' ? NaN : Number(trigger.injectionDepth);
     const budget = trigger.profileCharBudget == null || trigger.profileCharBudget === '' ? NaN : Number(trigger.profileCharBudget);
+    const loreBudget = trigger.loreCharBudget == null || trigger.loreCharBudget === '' ? NaN : Number(trigger.loreCharBudget);
     return {
         injectionMode: trigger.injectionMode === 'fixed' ? 'fixed' : 'auto',
         injectionDepth: Number.isFinite(depth) ? Math.max(0, Math.min(9999, Math.trunc(depth))) : 4,
         forceInsertAtEnd: trigger.forceInsertAtEnd === true,
         profileCharBudget: Number.isFinite(budget) ? Math.max(1000, Math.min(32000, Math.trunc(budget))) : 8000,
+        loreCharBudget: Number.isFinite(loreBudget) ? Math.max(1000, Math.min(32000, Math.trunc(loreBudget))) : 4000,
     };
 }
 

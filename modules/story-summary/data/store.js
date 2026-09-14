@@ -23,6 +23,7 @@ import { isRelationFact, parseRelationTarget } from "./fact-predicates.js";
 import { projectSummaryEvent } from "./events.js";
 import { upgradeStoredEventMemoryRoles } from "./migrations/event-memory-role.js";
 import { mergeProfileUpdates, normalizeProfiles, reconcileProfileAliases } from "./character-profiles.js";
+import { mergeLoreUpdates, normalizeLore, reconcileLoreAliases } from "./world-lore.js";
 
 const MODULE_ID = 'summaryStore';
 const FACTS_LIMIT_PER_SUBJECT = 10;
@@ -270,6 +271,14 @@ function normalizeSummaryJson(json) {
         const profiles = normalizeProfiles(next.profiles);
         if (JSON.stringify(profiles) !== JSON.stringify(next.profiles)) {
             next.profiles = profiles;
+            changed = true;
+        }
+    }
+
+    if (next.lore != null) {
+        const lore = normalizeLore(next.lore);
+        if (JSON.stringify(lore) !== JSON.stringify(next.lore)) {
+            next.lore = lore;
             changed = true;
         }
     }
@@ -717,6 +726,9 @@ export function mergeNewData(oldJson, parsed, endMesId, options = {}) {
             merged.profiles, incoming.profileUpdates, endMesId, aliasResult.json.characterAliases,
         );
     }
+    if (merged.lore?.length || incoming.loreUpdates?.length) {
+        aliasResult.json.lore = mergeLoreUpdates(merged.lore, incoming.loreUpdates, endMesId);
+    }
     const undo = buildSummaryUndo(beforeJson, aliasResult.json, {
         aliasChanged: aliasResult.aliasChanged,
     });
@@ -800,10 +812,11 @@ function hasSummaryContent(json) {
         || (json.facts || []).length > 0
         || (json.characterAliases || []).length > 0
         || (json.profiles || []).length > 0
+        || (json.lore || []).length > 0
     );
     if (hasKnownContent) return true;
 
-    const knownFields = new Set(['keywords', 'events', 'characters', 'arcs', 'facts', 'characterAliases', 'profiles']);
+    const knownFields = new Set(['keywords', 'events', 'characters', 'arcs', 'facts', 'characterAliases', 'profiles', 'lore']);
     if (Object.keys(json).some(field => !knownFields.has(field))) return true;
     return isPlainObject(json.characters)
         && Object.keys(json.characters).some(field => field !== 'main');
@@ -847,8 +860,10 @@ export async function executeRollback(chatId, store, targetEndMesId) {
         }
         json.facts = (json.facts || []).filter(f => (f._addedAt ?? 0) <= targetEndMesId);
         const preservedProfiles = json.profiles;
+        const preservedLore = json.lore;
         if (targetEndMesId < 0) json = {};
         if (preservedProfiles?.length) json.profiles = reconcileProfileAliases(preservedProfiles, json.characterAliases);
+        if (preservedLore?.length) json.lore = reconcileLoreAliases(preservedLore);
     }
 
     const retainedEventIds = new Set((json.events || []).map(event => event?.id).filter(Boolean));

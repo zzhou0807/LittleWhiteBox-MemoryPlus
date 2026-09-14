@@ -6,6 +6,7 @@ import { EVENT_MEMORY_ROLES } from "./events.js";
 import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './summary-delay.js';
 import { normalizeInjectionSettings } from './injection-settings.js';
 import { PROFILE_UPDATE_PROMPT } from './character-profiles.js';
+import { LORE_UPDATE_PROMPT } from './world-lore.js';
 
 const MODULE_ID = "summaryConfig";
 const SUMMARY_CONFIG_KEY = "storySummaryPanelConfig";
@@ -243,6 +244,12 @@ Before generating, observe the USER and analyze carefully:
   ],
   "characterAliasUpdates": [
     {"to": "统一主名，仅明确揭示身份时输出", "from": ["旧称呼/外号/代号/职称"], "evidence": "当前批次里的短证据"}
+  ],
+  "profileUpdates": [
+    {"name": "角色名", "fields": {"personality": {"value": "有原文依据的稳定性格", "evidence": "本批原文中的直接依据"}}}
+  ],
+  "loreUpdates": [
+    {"name": "设定名称（城市/物品/药水/魔法等）", "category": "world|city|item|potion|magic|faction|custom", "fields": {"details": {"value": "有原文依据的具体设定", "evidence": "本批原文中的直接依据"}}}
   ]
 }
 \`\`\`
@@ -263,7 +270,8 @@ Before generating, observe the USER and analyze carefully:
 ## Placeholder Notes
 - {$nextEventId} 会在运行时替换成实际起始事件编号，不要删除
 - {$existingEventCount}、{$historyRange} 这类占位符如果出现在你的自定义版本里，通常也不应该删除
-${PROFILE_UPDATE_PROMPT}`;
+${PROFILE_UPDATE_PROMPT}
+${LORE_UPDATE_PROMPT}`;
 
 export const DEFAULT_SUMMARY_ASSISTANT_CHECK_PROMPT = `Content review initiated...
 [Compliance Check Results]

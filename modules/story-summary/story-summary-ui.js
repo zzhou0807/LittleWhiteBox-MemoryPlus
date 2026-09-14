@@ -4,8 +4,9 @@
 import { orderSummaryEvents, projectEditedSummaryEvents } from './data/events.js';
 import { DEFAULT_SUMMARY_DELAY_FLOORS, normalizeSummaryDelayFloors } from './data/summary-delay.js';
 import { formatCharacterProfiles, normalizeProfiles } from './data/character-profiles.js';
+import { formatWorldLore, normalizeLore } from './data/world-lore.js';
 import { normalizeInjectionSettings } from './data/injection-settings.js';
-import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/memory-editors.js';
+import { mountEventEditor, mountLoreEditor, mountProfileEditor, renderLorePanel, renderProfilesPanel } from './ui/memory-editors.js';
 
 (function () {
     'use strict';
@@ -257,6 +258,7 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
         keywords: { title: '编辑关键词', hint: '每行一个关键词，格式：关键词|权重（核心/重要/一般）' },
         events: { title: '编辑事件时间线', hint: '可在任意事件前后插入、上下移动或撤销操作；最后保存，取消则不改动原数据。' },
         profiles: { title: '人物基础档案 · 编辑与审核', hint: '锁定字段不会被 AI 直接覆盖。空白字段可由后续总结补充；临时关系和情绪不属于固定人设。操作在点击保存后生效。' },
+        lore: { title: '世界观设定 · 编辑与审核', hint: '城市、物品、药水、魔法等固定设定。锁定字段不会被 AI 直接覆盖；临时道具和场景不属于固定设定。操作在点击保存后生效。' },
         characters: { title: '编辑人物关系', hint: '编辑时，每个要素都应完整' },
         arcs: { title: '编辑角色弧光', hint: '编辑时，每个要素都应完整' },
         facts: { title: '编辑事实图谱', hint: '每行一条：主体|谓词|值|趋势(可选)。删除用：主体|谓词|（留空值）' }
@@ -323,8 +325,9 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
         }
     };
 
-    let summaryData = { keywords: [], events: [], characters: { main: [], relationships: [] }, arcs: [], facts: [], profiles: [] };
+    let summaryData = { keywords: [], events: [], characters: { main: [], relationships: [] }, arcs: [], facts: [], profiles: [], lore: [] };
     let profileEditor = null;
+    let loreEditor = null;
     let builtInSummaryPrompts = { ...EMPTY_BUILTIN_SUMMARY_PROMPTS };
     let localGenerating = false;
     let vectorGenerating = false;
@@ -1224,6 +1227,7 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
         $('injection-mode').value = injection.injectionMode;
         $('injection-depth').value = injection.injectionDepth;
         $('profile-char-budget').value = injection.profileCharBudget;
+        $('lore-char-budget').value = injection.loreCharBudget;
         syncInjectionControls();
         fillBuiltInSummaryPromptFields();
         $('memory-prompt-template').value = config.prompts.memoryTemplate || '';
@@ -1304,6 +1308,7 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
             injectionMode: $('injection-mode').value,
             injectionDepth: $('injection-depth').value,
             profileCharBudget: $('profile-char-budget').value,
+            loreCharBudget: $('lore-char-budget').value,
             forceInsertAtEnd: config.trigger.forceInsertAtEnd,
         }));
         config.prompts.memoryTemplate = $('memory-prompt-template').value;
@@ -2179,6 +2184,7 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
             else if (section === 'arcs') renderArcsEditor(summaryData.arcs || []);
             else if (section === 'profiles') profileEditor = mountProfileEditor(es, summaryData.profiles,
                 [...new Set([...(summaryData.characters?.main || []).map(getCharName), ...(summaryData.arcs || []).map(arc => arc.name)])]);
+            else if (section === 'lore') loreEditor = mountLoreEditor(es, summaryData.lore);
         }
 
         $('editor-modal').classList.add('active');
@@ -2207,6 +2213,8 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
                 });
             } else if (section === 'profiles') {
                 parsed = profileEditor.read();
+            } else if (section === 'lore') {
+                parsed = loreEditor.read();
             } else if (section === 'events') {
                 const oldMap = new Map((summaryData.events || []).map(e => [e.id, e]));
                 parsed = Array.from(es.querySelectorAll('.event-item')).map((it, index) => {
@@ -2298,6 +2306,7 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
         else if (section === 'arcs') renderArcs(parsed);
         else if (section === 'facts') renderFacts(parsed);
         else if (section === 'profiles') renderBaseProfiles(parsed);
+        else if (section === 'lore') renderWorldLore(parsed);
 
         closeEditor();
     }
@@ -2361,6 +2370,7 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
                     if (p.characters) renderRelations(p.characters);
                     if (p.arcs) renderArcs(p.arcs);
                     renderBaseProfiles(p.profiles || []);
+                    renderWorldLore(p.lore || []);
                     if (p.facts) renderFacts(p.facts);
                     $('stat-events').textContent = p.events?.length || 0;
                     if (p.lastSummarizedMesId != null) $('stat-summarized').textContent = p.lastSummarizedMesId + 1;
@@ -2379,7 +2389,7 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
                 $('stat-pending').textContent = t;
                 $('summarized-count').textContent = 0;
                 if (currentEditSection) closeEditor();
-                summaryData = { keywords: [], events: [], characters: { main: [], relationships: [] }, arcs: [], facts: [], profiles: [] };
+                summaryData = { keywords: [], events: [], characters: { main: [], relationships: [] }, arcs: [], facts: [], profiles: [], lore: [] };
                 currentTimelineChatId = '';
                 renderKeywords([]);
                 renderTimeline([]);
@@ -2387,6 +2397,7 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
                 renderArcs([]);
                 renderFacts([]);
                 renderBaseProfiles([]);
+                renderWorldLore([]);
                 break;
             }
 
@@ -2557,6 +2568,12 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
         $('base-profiles-preview').textContent = '';
     }
 
+    function renderWorldLore(lore) {
+        summaryData.lore = normalizeLore(lore);
+        renderLorePanel($('world-lore-list'), summaryData.lore);
+        $('world-lore-preview').textContent = '';
+    }
+
     function syncInjectionControls() {
         const atEnd = $('trigger-insert-at-end').checked;
         const fixed = $('injection-mode').value === 'fixed';
@@ -2568,6 +2585,7 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
             : fixed ? `当前策略：距末尾 ${injection.injectionDepth} 条消息；聊天不足时放在最前。角色采用上方设置。`
                 : '当前策略：跟随总结 / 向量边界自动调整；浅层聊天限制在实际消息范围内。';
         $('base-profiles-preview').textContent = '';
+        $('world-lore-preview').textContent = '';
     }
 
     function bindEvents() {
@@ -2594,6 +2612,11 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
             const budget = normalizeInjectionSettings({ profileCharBudget: $('profile-char-budget').value }).profileCharBudget;
             const preview = formatCharacterProfiles(summaryData.profiles, { maxChars: budget });
             $('base-profiles-preview').textContent = `仅预览已保存的人物底稿，不代表本轮向量召回或完整最终提示词。\n独立预算 ${budget} 字符；输出 ${preview.text.length} 字符；省略 ${preview.omittedFields} 个字段。\n\n${preview.text || '暂无常驻基础档案。'}`;
+        };
+        $('preview-world-lore').onclick = () => {
+            const budget = normalizeInjectionSettings({ loreCharBudget: $('lore-char-budget').value }).loreCharBudget;
+            const preview = formatWorldLore(summaryData.lore, { maxChars: budget });
+            $('world-lore-preview').textContent = `仅预览已保存的世界观设定，不代表本轮向量召回或完整最终提示词。\n独立预算 ${budget} 字符；输出 ${preview.text.length} 字符；省略 ${preview.omittedFields} 个字段。\n\n${preview.text || '暂无常驻世界观设定。'}`;
         };
         $('settings-backdrop').onclick = closeSettings;
         $('settings-close').onclick = closeSettings;
@@ -2808,6 +2831,7 @@ import { mountEventEditor, mountProfileEditor, renderProfilesPanel } from './ui/
 
         bindEvents();
         renderBaseProfiles([]);
+        renderWorldLore([]);
         syncCurrentChatSummaryControls(currentChatSummaryEnabled);
 
         // === THEME SWITCHER ===

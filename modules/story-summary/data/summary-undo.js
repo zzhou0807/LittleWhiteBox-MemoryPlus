@@ -130,6 +130,13 @@ export function buildSummaryUndo(beforeJson = {}, afterJson = {}, { aliasChanged
         getKey: eventKey,
         forceSnapshot: aliasChanged,
     });
+    recordCollection(undo, beforeJson.lore || [], afterJson.lore || [], {
+        previousField: 'previousLore',
+        generatedField: 'generatedLore',
+        changesField: 'loreChanges',
+        getKey: eventKey,
+        forceSnapshot: aliasChanged,
+    });
 
     const beforeAliases = beforeJson.characterAliases || [];
     const afterAliases = afterJson.characterAliases || [];
@@ -148,6 +155,7 @@ const SNAPSHOT_PAIRS = [
     ['previousFacts', 'generatedFacts'],
     ['previousCharacterAliases', 'generatedCharacterAliases'],
     ['previousProfiles', 'generatedProfiles'],
+    ['previousLore', 'generatedLore'],
 ];
 
 const CHANGE_FIELDS = [
@@ -156,6 +164,7 @@ const CHANGE_FIELDS = [
     ['arcChanges', arcKey],
     ['factChanges', factKey],
     ['profileChanges', eventKey],
+    ['loreChanges', eventKey],
 ];
 
 function normalizeChanges(value, getKey) {
@@ -208,6 +217,7 @@ export function normalizeSummaryUndo(value) {
         ['generatedArcs', 'arcChanges'],
         ['generatedFacts', 'factChanges'],
         ['generatedProfiles', 'profileChanges'],
+        ['generatedLore', 'loreChanges'],
     ]) {
         if (Object.hasOwn(value, snapshotField) && Object.hasOwn(value, changesField)) return null;
     }
@@ -266,6 +276,7 @@ function collections(json) {
         facts: Array.isArray(json.facts) ? json.facts : [],
         characterAliases: Array.isArray(json.characterAliases) ? json.characterAliases : [],
         profiles: Array.isArray(json.profiles) ? json.profiles : [],
+        lore: Array.isArray(json.lore) ? json.lore : [],
     };
 }
 
@@ -281,6 +292,7 @@ export function applySummaryUndo(json = {}, rawUndo) {
         ['previousFacts', 'generatedFacts', 'facts'],
         ['previousCharacterAliases', 'generatedCharacterAliases', 'characterAliases'],
         ['previousProfiles', 'generatedProfiles', 'profiles'],
+        ['previousLore', 'generatedLore', 'lore'],
     ];
     for (const [, generatedField, collection] of snapshots) {
         if (Object.hasOwn(undo, generatedField) && !sameJson(current[collection], undo[generatedField])) {
@@ -294,6 +306,7 @@ export function applySummaryUndo(json = {}, rawUndo) {
         ['arcChanges', 'arcs', arcKey],
         ['factChanges', 'facts', factKey],
         ['profileChanges', 'profiles', eventKey],
+        ['loreChanges', 'lore', eventKey],
     ];
     for (const [field, collection, getKey] of changeSets) {
         if (undo[field] && !changesMatch(current[collection], undo[field], getKey)) return null;

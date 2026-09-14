@@ -68,7 +68,7 @@
         <header>
             <div>
                 <h1 style="user-select: none;">剧情<span>总结</span></h1>
-                <div class="subtitle">Story Summary · Memory+ 2 · 人物底稿 / 自由排序</div>
+                <div class="subtitle">Story Summary · Memory+ 3 · 人物底稿 / 世界观设定 / 自由排序</div>
             </div>
             <div class="stats">
                 <div class="stat">
@@ -153,6 +153,15 @@
                     </div>
                     <p class="memory-muted">固定人设单独保存 · 锁定字段须审核 · 常驻档案不依赖向量召回</p>
                     <div class="memory-profiles-list scroll" id="base-profiles-list"></div>
+                </section>
+
+                <section class="card memory-profiles">
+                    <div class="sec-head">
+                        <div class="sec-title">世界观设定</div>
+                        <button class="sec-btn" data-section="lore">编辑 / 审核</button>
+                    </div>
+                    <p class="memory-muted">城市 / 物品 / 药水 / 魔法等固定设定 · 锁定字段须审核 · 常驻设定不依赖向量召回</p>
+                    <div class="memory-profiles-list scroll" id="world-lore-list"></div>
                 </section>
                 <!-- Facts -->
                 <section class="card facts">
@@ -435,11 +444,17 @@
                                     <label for="profile-char-budget">基础档案独立预算（字符）</label>
                                     <input id="profile-char-budget" type="number" min="1000" max="32000" step="1000" value="8000">
                                 </div>
+                                <div class="settings-field">
+                                    <label for="lore-char-budget">世界观设定独立预算（字符）</label>
+                                    <input id="lore-char-budget" type="number" min="1000" max="32000" step="1000" value="4000">
+                                </div>
                             </div>
                             <p class="memory-muted" id="injection-position-status" aria-live="polite"></p>
                             <p class="memory-muted">深度越小越靠近末尾。下方“强制插入到聊天最后”优先于以上策略。此设置不改变隐藏楼层；关闭当前聊天启用仍会停止全部记忆注入。</p>
                             <button class="btn btn-sm" id="preview-base-profiles" type="button">预览人物底稿（不调用模型）</button>
                             <pre class="memory-injection-preview" id="base-profiles-preview"></pre>
+                            <button class="btn btn-sm" id="preview-world-lore" type="button">预览世界观设定（不调用模型）</button>
+                            <pre class="memory-injection-preview" id="world-lore-preview"></pre>
                         </section>
 
                         <!-- Auto Summary with sub-options -->

@@ -1,5 +1,6 @@
 import { mergeProfileUpdates, normalizeProfiles, stampEditedProfiles } from '../../modules/story-summary/data/character-profiles.js';
 import { stampEditedSummaryEvents } from '../../modules/story-summary/data/events.js';
+import { mergeLoreUpdates, normalizeLore, stampEditedLore } from '../../modules/story-summary/data/world-lore.js';
 
 const frame = document.getElementById('preview');
 const status = document.getElementById('status');
@@ -26,6 +27,15 @@ const summary = {
         } },
         { id: 'person-2', name: '青岚', fields: { background: '熟悉山路的向导。', personality: '爽快务实，重视承诺。' } },
     ]), [{ name: '林舟', fields: { personality: { value: '冲动好胜，不再核对任何证据。', evidence: '一次争执后着急出发（用于测试拦截，不能当作稳定人设）' } } }], 29),
+    lore: mergeLoreUpdates(normalizeLore([
+        { id: 'lore-1', name: '药谷', category: 'city', fields: {
+            overview: { value: '夹在两座山脊之间的常年起雾的谷地，盛产稀有药草。', evidence: '虚构测试设定' },
+            rules: { value: '谷中雾气会放大气味，因此采药必须佩戴湿布面罩。', evidence: '虚构测试设定' },
+        } },
+    ]), [
+        { name: '药谷', category: 'city', fields: { details: { value: '谷口立着一座废弃的采药人哨塔。', evidence: '虚构测试设定' } } },
+        { name: '清醒草', category: 'potion', fields: { details: { value: '嚼碎后在半个时辰内不受迷雾影响。', evidence: '虚构测试设定' } } },
+    ], 29),
 };
 
 function send(type, payload = {}) {
@@ -50,6 +60,7 @@ window.addEventListener('message', event => {
         status.textContent = '测试配置已保存到本页内存；没有修改任何酒馆设置。';
     } else if (data.type === 'UPDATE_SECTION') {
         if (data.section === 'profiles') summary.profiles = stampEditedProfiles(summary.profiles, data.data, 37);
+        else if (data.section === 'lore') summary.lore = stampEditedLore(summary.lore, data.data, 37);
         else if (data.section === 'events') summary.events = stampEditedSummaryEvents(summary.events, data.data, 37);
         else summary[data.section] = data.data;
         send('SUMMARY_FULL_DATA', { payload: summary });
@@ -69,7 +80,10 @@ document.getElementById('simulate').onclick = () => {
             abilities: { value: '擅长辨认常见药草；不认识的品种需要查证。', evidence: '测试：新的明确能力描述' },
         },
     }], 39);
+    summary.lore = mergeLoreUpdates(summary.lore, [{
+        name: '药谷', fields: { rules: { value: '据说谷底的雾会让人忘记来时的路。', evidence: '测试：与既有规则冲突，应进入待审核' } },
+    }], 39);
     publish();
-    status.textContent = '模拟完成：锁定性格不变，空白能力字段补充，相同待审建议不重复。';
+    status.textContent = '模拟完成：锁定性格不变，空白能力字段补充，相同待审建议不重复；已锁定的世界观规则进入待审核。';
 };
 frame.src = '../../modules/story-summary/story-summary.html';
