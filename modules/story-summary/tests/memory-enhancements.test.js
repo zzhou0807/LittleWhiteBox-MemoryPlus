@@ -53,7 +53,11 @@ test('locked personality becomes a candidate without overwriting the baseline', 
 test('missing and empty updates never clear a profile', () => {
     const before = baseline();
     assert.deepEqual(mergeProfileUpdates(before, [], 40), before);
-    assert.deepEqual(mergeProfileUpdates(before, [update('personality', ''), update('motivation', '不同目标', '')], 40), before);
+    assert.deepEqual(mergeProfileUpdates(before, [update('personality', '')], 40), before);
+    const staged = mergeProfileUpdates(before, [update('motivation', '不同目标', '')], 40);
+    assert.equal(staged[0].fields.motivation.value, '编写万草图鉴');
+    assert.equal(staged[0].candidates[0].value, '不同目标');
+    assert.match(staged[0].candidates[0].evidence, /未提供依据/);
 });
 
 test('blank fields fill from evidence and remain locked by default', () => {

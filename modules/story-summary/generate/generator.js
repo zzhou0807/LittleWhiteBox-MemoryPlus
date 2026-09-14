@@ -11,6 +11,8 @@ import {
     saveSummaryStoreImmediately,
 } from "../data/store.js";
 import { formatCharacterAliasTableForAI, sanitizeCharacterAliasUpdates } from "../data/character-aliases.js";
+import { PROFILE_FIELDS } from "../data/character-profiles.js";
+import { LORE_CATEGORIES, LORE_FIELDS } from "../data/world-lore.js";
 import {
     generateSummary,
     isSummaryGenerationCancelledError,
@@ -149,6 +151,23 @@ function sanitizeEventsCausality(parsed, existingEventIds) {
 // 辅助函数
 // ═══════════════════════════════════════════════════════════════════════════
 
+// 只列出“还是空白”的字段标签，让模型知道该补什么，而不是把整份档案再抄一遍。
+function formatMissingFieldsForAI(entries, formatLabel, fields) {
+    const lines = [];
+    for (const entry of entries) {
+        const values = entry?.fields || {};
+        const missing = Object.entries(fields)
+            .filter(([key]) => {
+                const raw = values[key];
+                const value = typeof raw === 'string' ? raw : raw?.value;
+                return !String(value || '').trim();
+            })
+            .map(([, label]) => label);
+        if (missing.length) lines.push(`${formatLabel(entry)}：${missing.join('、')}`);
+    }
+    return lines.join('\n');
+}
+
 export function formatExistingSummaryForAI(store) {
     if (!store?.json) return "（空白，这是首次总结）";
 
@@ -157,6 +176,28 @@ export function formatExistingSummaryForAI(store) {
     if (data.profiles?.length) {
         parts.push('【已有基础档案｜locked=true 的字段不得无依据改写】');
         parts.push(JSON.stringify(data.profiles.map(profile => ({ name: profile.name, aliases: profile.aliases, fields: profile.fields }))));
+        const missing = formatMissingFieldsForAI(
+            data.profiles,
+            profile => profile.name,
+            PROFILE_FIELDS,
+        );
+        if (missing) parts.push(`【档案待补全字段】\n${missing}\n若本批新对话或下方【已记录事件】中有明确依据，请用 profileUpdates 补全这些字段；没有依据就留空。`);
+    }
+
+    if (data.lore?.length) {
+        parts.push('\n【已有世界观设定｜locked=true 的字段不得无依据改写】');
+        parts.push(JSON.stringify(data.lore.map(entry => ({
+            name: entry.name,
+            category: entry.category,
+            aliases: entry.aliases,
+            fields: entry.fields,
+        }))));
+        const missingLore = formatMissingFieldsForAI(
+            data.lore,
+            entry => `[${LORE_CATEGORIES[entry.category] || LORE_CATEGORIES.custom}] ${entry.name}`,
+            LORE_FIELDS,
+        );
+        if (missingLore) parts.push(`【世界观设定待补全字段】\n${missingLore}\n若有明确依据，请用 loreUpdates 补全；没有依据就留空。`);
     }
 
     if (data.events?.length) {
@@ -364,6 +405,30 @@ export async function runSummaryGeneration(mesId, config, callbacks = {}, runtim
 
     if (parsed.factUpdates?.length) {
         xbLog.info(MODULE_ID, `Facts 更新: ${parsed.factUpdates.length} 条`);
+    }
+
+    // 让“模型到底有没有输出档案”可查：命中 0 条却收到更新时给出警告。
+    const describeUndo = (changesField, snapshotField) => {
+        const changes = mergeResult.undo?.[changesField];
+        if (Array.isArray(changes)) return `${changes.length} 条变更`;
+        return mergeResult.undo?.[snapshotField] ? '有变更（快照）' : '无变更';
+    };
+    const countUpdates = value => Array.isArray(value) ? value.length : 0;
+    const profileUpdatesIn = countUpdates(parsed.profileUpdates);
+    const loreUpdatesIn = countUpdates(parsed.loreUpdates);
+    const profileResult = describeUndo('profileChanges', 'generatedProfiles');
+    const loreResult = describeUndo('loreChanges', 'generatedLore');
+    if (profileUpdatesIn || loreUpdatesIn || profileResult !== '无变更' || loreResult !== '无变更') {
+        xbLog.info(
+            MODULE_ID,
+            `档案增量: profileUpdates ${profileUpdatesIn} 条 → ${profileResult}；loreUpdates ${loreUpdatesIn} 条 → ${loreResult}`,
+        );
+    }
+    if (profileUpdatesIn && profileResult === '无变更') {
+        xbLog.warn(MODULE_ID, '模型返回了 profileUpdates，但没有写入任何变更：字段名或取值可能无法识别，请检查模型输出格式');
+    }
+    if (loreUpdatesIn && loreResult === '无变更') {
+        xbLog.warn(MODULE_ID, '模型返回了 loreUpdates，但没有写入任何变更：字段名或取值可能无法识别，请检查模型输出格式');
     }
 
     const newEventIds = (parsed.events || []).map(e => e.id);

@@ -61,7 +61,11 @@ test('lore fields fill from evidence, stay locked, and conflicts become review i
 test('missing or evidence-less lore updates never clear or overwrite a setting', () => {
     const before = baseline();
     assert.deepEqual(mergeLoreUpdates(before, [], 40), before);
-    assert.deepEqual(mergeLoreUpdates(before, [update('rules', ''), update('rules', '不同说法', '')], 40), before);
+    assert.deepEqual(mergeLoreUpdates(before, [update('rules', '')], 40), before);
+    const staged = mergeLoreUpdates(before, [update('rules', '不同说法', '')], 40);
+    assert.equal(staged[0].fields.rules.value, '雾气会放大气味');
+    assert.equal(staged[0].candidates[0].value, '不同说法');
+    assert.match(staged[0].candidates[0].evidence, /未提供依据/);
     assert.deepEqual(mergeLoreUpdates(before, [{ name: '', fields: { rules: { value: '匿名设定', evidence: '依据' } } }], 40), before);
 });
 
@@ -71,6 +75,26 @@ test('explicitly unlocked lore fields may update and retain the previous value i
     const result = mergeLoreUpdates(entries, [update('rules', '雾气会放大气味，但雨中会减弱')], 40);
     assert.equal(result[0].fields.rules.value, '雾气会放大气味，但雨中会减弱');
     assert.equal(result[0].history[0].previous, '雾气会放大气味');
+});
+
+test('loose model output is accepted: plain strings, flat fields and entry-level evidence', () => {
+    const before = baseline();
+    const entryEvidence = mergeLoreUpdates(before, [{
+        name: '药谷', evidence: '#12 原文描述', fields: { details: { value: '谷口有一座废弃哨塔' } },
+    }], 40);
+    assert.equal(entryEvidence[0].fields.details.value, '谷口有一座废弃哨塔');
+    assert.equal(entryEvidence[0].fields.details.evidence, '#12 原文描述');
+
+    // 字段写成纯字符串、并且把依据摊平到条目顶层，同样能落库。
+    const flat = mergeLoreUpdates(before, [{ name: '药谷', details: '谷口有一座废弃哨塔', evidence: '#13' }], 42);
+    assert.equal(flat[0].fields.details.value, '谷口有一座废弃哨塔');
+    assert.equal(flat[0].fields.details.evidence, '#13');
+
+    // 没有依据的纯字符串不会丢，但只进待审核，不直接改写固定设定。
+    const unverified = mergeLoreUpdates(before, [{ name: '药谷', fields: { details: '谷口有一座废弃哨塔' } }], 43);
+    assert.equal(unverified[0].fields.details.value, '');
+    assert.equal(unverified[0].candidates.length, 1);
+    assert.equal(unverified[0].candidates[0].value, '谷口有一座废弃哨塔');
 });
 
 test('accepting and rejecting staged lore candidates is logged and duplicate advice is suppressed', () => {

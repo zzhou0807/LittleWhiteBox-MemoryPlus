@@ -191,6 +191,8 @@ Before generating, observe the USER and analyze carefully:
 - What relationship CHANGES happened?
 - What arc PROGRESS was made?
 - What facts changed? (status/position/ownership/relationships/stable distinctive physical traits)
+- 本批出现了哪些新的稳定人物信息（身份、外貌、性格、底线、说话方式、长期动机、能力）？已有基础档案里的空白字段，能否用本批对话或【已记录事件】补全？
+- 本批出现了哪些新的世界观设定（城市与地点、物品与道具、药水与药剂、魔法与能力体系、势力与组织）？
 
 ## factUpdates 规则
 - 目的: 纠错 & 世界一致性约束，只记录硬性事实
@@ -212,13 +214,19 @@ Before generating, observe the USER and analyze carefully:
 - 例: {"to":"李玄清","from":["道长"],"evidence":"#37 道长报出本名李玄清"}
 - 不要列出要修改哪些事件/事实/弧光，系统会自动合并
 
+${PROFILE_UPDATE_PROMPT}
+
+${LORE_UPDATE_PROMPT}
+
 ## Output Format
 \`\`\`json
 {
   "mindful_prelude": {
     "user_insight": "本轮主要新增了哪些情节、关系或事实，哪些细节值得进入可召回摘要",
     "dedup_analysis": "已有X个事件，本次识别Y个新事件",
-    "fact_changes": "识别到的事实变化概述"
+    "fact_changes": "识别到的事实变化概述",
+    "profile_scan": "已有基础档案的空白字段里，本轮能补全的角色与字段；没有就写 none",
+    "lore_scan": "本轮出现的世界观设定（城市/物品/药水/魔法/势力等）；没有就写 none"
   },
   "keywords": [
     {"text": "综合历史+新内容的全剧情关键词(5-10个)", "weight": "核心|重要|一般"}
@@ -262,6 +270,7 @@ Before generating, observe the USER and analyze carefully:
 - causedBy 仅在因果明确时填写，允许为[]，0-2个
 - factUpdates 可为空数组
 - characterAliasUpdates 是可选字段；没有明确身份揭示时不要输出这个 key
+- profileUpdates 与 loreUpdates 每批都要检查一遍：有依据就输出，确实没有就省略这个 key；不要因为“已经在别处写过”而跳过检查
 - 合法JSON，字符串值内部避免英文双引号
 - 用朴实、白描、有烟火气的笔触记录事实，避免比喻和意象
 - 严谨、注重细节，避免使用模糊的概括性语言，应用具体的动词描述动作，例:谁,在什么时间/地点,通过什么方式,对谁,做了什么事,出现了什么道具,结果如何。
@@ -269,9 +278,7 @@ Before generating, observe the USER and analyze carefully:
 
 ## Placeholder Notes
 - {$nextEventId} 会在运行时替换成实际起始事件编号，不要删除
-- {$existingEventCount}、{$historyRange} 这类占位符如果出现在你的自定义版本里，通常也不应该删除
-${PROFILE_UPDATE_PROMPT}
-${LORE_UPDATE_PROMPT}`;
+- {$existingEventCount}、{$historyRange} 这类占位符如果出现在你的自定义版本里，通常也不应该删除`;
 
 export const DEFAULT_SUMMARY_ASSISTANT_CHECK_PROMPT = `Content review initiated...
 [Compliance Check Results]
