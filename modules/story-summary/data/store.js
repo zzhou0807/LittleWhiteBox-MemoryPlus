@@ -19,7 +19,7 @@ import {
     isLegacySummaryHistoryEntry,
     normalizeSummaryUndo,
 } from "./summary-undo.js";
-import { isRelationFact, parseRelationTarget } from "./fact-predicates.js";
+import { isRelationFact, normalizeRelationPredicate, parseRelationTarget } from "./fact-predicates.js";
 import { projectSummaryEvent } from "./events.js";
 import { upgradeStoredEventMemoryRoles } from "./migrations/event-memory-role.js";
 import { mergeProfileUpdates, normalizeProfiles, reconcileProfileAliases } from "./character-profiles.js";
@@ -480,7 +480,7 @@ export function extractRelationshipsFromFacts(facts) {
  * 生成 fact 的唯一键（s + p）
  */
 function factKey(f) {
-    return `${f.s}::${f.p}`;
+    return `${String(f.s || '').trim()}::${normalizeRelationPredicate(f.p) || String(f.p || '').trim()}`;
 }
 
 /**
@@ -506,7 +506,12 @@ export function mergeFacts(existingFacts, updates, floor) {
 
     for (const f of existingFacts || []) {
         if (!f.retracted) {
-            map.set(factKey(f), f);
+            const key = factKey(f);
+            const existing = map.get(key);
+            if (!existing || !isRelationFact(f)
+                || Number(f.since ?? f._addedAt ?? 0) >= Number(existing.since ?? existing._addedAt ?? 0)) {
+                map.set(key, f);
+            }
         }
     }
 
@@ -528,14 +533,14 @@ export function mergeFacts(existingFacts, updates, floor) {
         const newFact = {
             id: existing?.id || `f-${nextId++}`,
             s: u.s.trim(),
-            p: u.p.trim(),
+            p: normalizeRelationPredicate(u.p) || u.p.trim(),
             o: String(u.o).trim(),
             since: floor,
-            _isState: existing?._isState ?? !!u.isState,
+            _isState: isRelationFact(u) || (existing?._isState ?? !!u.isState),
         };
 
-        if (isRelationFact(newFact) && u.trend) {
-            newFact.trend = u.trend;
+        if (isRelationFact(newFact) && (u.trend || existing?.trend)) {
+            newFact.trend = u.trend || existing.trend;
         }
 
         if (existing?._addedAt != null) {
@@ -549,7 +554,7 @@ export function mergeFacts(existingFacts, updates, floor) {
 
     const factsBySubject = new Map();
     for (const f of map.values()) {
-        if (f._isState) continue;
+        if (f._isState || isRelationFact(f)) continue;
         const arr = factsBySubject.get(f.s) || [];
         arr.push(f);
         factsBySubject.set(f.s, arr);

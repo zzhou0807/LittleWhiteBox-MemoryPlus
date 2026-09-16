@@ -21,74 +21,16 @@ import {
 import { filterText } from "../vector/utils/text-filter.js";
 import { getSummarySourceEnd } from './source-boundary.js';
 import { normalizeSummaryDelayFloors } from '../data/summary-delay.js';
+import { sanitizeFacts } from './fact-updates.js';
+import { isRelationFact, parseRelationTarget } from '../data/fact-predicates.js';
 
 const MODULE_ID = 'summaryGenerator';
 const SUMMARY_SESSION_ID = 'xb9';
 const MAX_CAUSED_BY = 2;
-const FACT_PREDICATE_ALIASES = new Map([
-    ['当前位置', '位置'],
-    ['当前所在地', '位置'],
-    ['所在位置', '位置'],
-    ['所在地', '位置'],
-    ['当前状态', '状态'],
-]);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // factUpdates 清洗
 // ═══════════════════════════════════════════════════════════════════════════
-
-function normalizeRelationPredicate(p) {
-    if (/^对.+的看法$/.test(p)) return p;
-    if (/^与.+的关系$/.test(p)) return p;
-    return null;
-}
-
-function normalizeFactPredicate(p) {
-    const text = String(p || '').trim();
-    return FACT_PREDICATE_ALIASES.get(text) || text;
-}
-
-function sanitizeFacts(parsed) {
-    if (!parsed) return;
-
-    const updates = Array.isArray(parsed.factUpdates) ? parsed.factUpdates : [];
-    const ok = [];
-
-    for (const item of updates) {
-        const s = String(item?.s || '').trim();
-        const pRaw = normalizeFactPredicate(item?.p);
-
-        if (!s || !pRaw) continue;
-
-        if (item.retracted === true) {
-            ok.push({ s, p: pRaw, retracted: true });
-            continue;
-        }
-
-        const o = String(item?.o || '').trim();
-        if (!o) continue;
-
-        const relP = normalizeRelationPredicate(pRaw);
-        const isRel = !!relP;
-        const fact = {
-            s,
-            p: isRel ? relP : pRaw,
-            o,
-            isState: !!item.isState,
-        };
-
-        if (isRel && item.trend) {
-            const validTrends = ['破裂', '厌恶', '反感', '陌生', '投缘', '亲密', '交融'];
-            if (validTrends.includes(item.trend)) {
-                fact.trend = item.trend;
-            }
-        }
-
-        ok.push(fact);
-    }
-
-    parsed.factUpdates = ok;
-}
 
 function sanitizeAliases(parsed) {
     if (!parsed) return;
@@ -173,6 +115,14 @@ export function formatExistingSummaryForAI(store) {
 
     const data = store.json;
     const parts = [];
+    const relationships = (data.facts || []).filter(fact => !fact.retracted && isRelationFact(fact));
+    parts.push('【已记录人物关系｜有向关系，非人物基础档案】');
+    parts.push(relationships.length
+        ? JSON.stringify(relationships.map(fact => ({
+            from: fact.s, to: parseRelationTarget(fact.p), label: fact.o, trend: fact.trend || '陌生',
+        })))
+        : '尚未记录人物关系；有角色名单不代表已经建立关系。');
+    parts.push('每批核对本批对话与【已记录事件】：有明确互动依据但尚未记录的关系也要通过 factUpdates 补建，不必等待态度再次变化；无依据不补，已有关系不重复，事件不重写。');
     if (data.profiles?.length) {
         parts.push('【已有基础档案｜locked=true 的字段不得无依据改写】');
         parts.push(JSON.stringify(data.profiles.map(profile => ({ name: profile.name, aliases: profile.aliases, fields: profile.fields }))));
@@ -405,6 +355,12 @@ export async function runSummaryGeneration(mesId, config, callbacks = {}, runtim
 
     if (parsed.factUpdates?.length) {
         xbLog.info(MODULE_ID, `Facts 更新: ${parsed.factUpdates.length} 条`);
+    }
+    const relationUpdates = (parsed.factUpdates || []).filter(isRelationFact);
+    const relationCount = (merged.facts || []).filter(fact => !fact.retracted && isRelationFact(fact)).length;
+    xbLog.info(MODULE_ID, `关系增量: 本批 ${relationUpdates.length} 条（含删除），合并后共 ${relationCount} 条`);
+    if (!relationUpdates.length && !relationCount && merged.characters?.main?.length > 1) {
+        xbLog.warn(MODULE_ID, '已有多个角色，但模型没有输出可识别的关系增量；请检查原始总结中的 factUpdates。角色名单不会自动生成关系。');
     }
 
     // 让“模型到底有没有输出档案”可查：命中 0 条却收到更新时给出警告。

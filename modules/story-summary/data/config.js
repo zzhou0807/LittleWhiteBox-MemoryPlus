@@ -31,7 +31,7 @@ Incremental_Summary_Requirements:
   - Retrieval_Readiness: event.summary 必须面向未来召回，不得写成泛化剧情概括
   - Event_Memory_Role: Identify what each event leaves for later context, using the Memory Role definitions below.
   - Causal_Chain: 为每个新事件标注直接前因事件ID（causedBy）。仅在因果关系明确（直接导致/明确动机/承接后果）时填写；不明确时填[]完全正常。0-2个，只填 evt-数字，指向已存在或本次新输出事件。
-  - Character_Dynamics: 识别新角色，追踪关系趋势（破裂/厌恶/反感/陌生/投缘/亲密/交融）
+  - Character_Dynamics: 识别新角色；每批检查有依据的初次关系、遗漏关系和关系变化，通过 factUpdates 建立有向关系（破裂/厌恶/反感/陌生/投缘/亲密/交融），只写角色名单不算完成关系提取
   - Arc_Tracking: 更新角色弧光轨迹与成长进度(0.0-1.0)
   - Fact_Tracking: 维护 SPO 三元组知识图谱。追踪生死、物品归属、位置、关系、稳定辨识性身体特征等硬性事实。采用 KV 覆盖模型（s+p 为键）。
 </task_settings>
@@ -142,6 +142,8 @@ Core rules:
    - isState: false -> non-core facts / soft memories that may be pruned by capacity limits later
 4) Relationship facts:
    - Use predicate format: "对X的看法" (X is the target person)
+   - First evidenced connections and missing connections count as NEW facts even if both characters or their interaction already appear in recorded events. Do not wait for another relationship change.
+   - Relationship facts must use isState: true. Character profiles and arcs do not replace relationship facts.
    - trend is required for relationship facts, one of:
      破裂 | 厌恶 | 反感 | 陌生 | 投缘 | 亲密 | 交融
 5) Retraction (deletion):
@@ -189,6 +191,7 @@ Before generating, observe the USER and analyze carefully:
 - What NEW events occurred (not in existing summary)?
 - What NEW characters appeared for the first time?
 - What relationship CHANGES happened?
+- 哪些具名角色已有明确互动，但【已记录人物关系】中还没有对应方向的关系？首次建立、补建遗漏关系和关系变化都要检查，不能只新增角色名。
 - What arc PROGRESS was made?
 - What facts changed? (status/position/ownership/relationships/stable distinctive physical traits)
 - 本批出现了哪些新的稳定人物信息（身份、外貌、性格、底线、说话方式、长期动机、能力）？已有基础档案里的空白字段，能否用本批对话或【已记录事件】补全？
@@ -206,6 +209,15 @@ Before generating, observe the USER and analyze carefully:
 - 更新: {s, p, o, isState, trend?}
 - 谓词规范化: 复用已有谓词，不要发明同义词
 - 只输出有变化的条目，确保少、硬、稳定
+
+## 人物关系提取（每批必查）
+- 人物名单 newCharacters、人物基础档案 profileUpdates、关系与成长 arcUpdates 都不会自动建立关系边。关系必须单独输出在 factUpdates 中，不能只写进事件、性格或弧光。
+- 检查三类：本批初次建立的关系；已有角色间新增或变化的态度；本批对话或【已记录事件】有明确依据、但【已记录人物关系】遗漏的关系。补建遗漏关系属于新增事实，不属于重复事件；不必等待态度再次变化。
+- 只提取有明确互动或关系描述的具名角色，不把同场出现当作相识，不把角色名单两两连线，不猜测好感或敌意。
+- 统一格式：{"s":"看待对方的角色名","p":"对目标角色名的看法","o":"当前具体态度及简短互动依据","isState":true,"trend":"破裂|厌恶|反感|陌生|投缘|亲密|交融"}。
+- 即使正文为繁体或其他语言，p 也统一用“对X的看法”，仅 X 保留原文姓名；trend 使用上述固定值。陌生表示中性或不熟悉，不能用来捏造没有依据的关系。
+- 关系有方向：甲信任乙不代表乙信任甲；双方态度都有证据才分别输出两条。有依据的普通熟识、合作、信任、戒备、敌意也要记录，不限于恋爱。
+- 已有的同方向关系未变化就省略，不清空其他关系；有变化时提供该方向当前完整描述，不能只写“更好了”。人物固定性格仍由基础档案维护。
 
 ## characterAliasUpdates 规则（可选）
 - 目的: 处理同一角色先用称号/外号/代号，后续揭示真名或统一主名的情况
@@ -225,6 +237,7 @@ ${LORE_UPDATE_PROMPT}
     "user_insight": "本轮主要新增了哪些情节、关系或事实，哪些细节值得进入可召回摘要",
     "dedup_analysis": "已有X个事件，本次识别Y个新事件",
     "fact_changes": "识别到的事实变化概述",
+    "relationship_scan": "本批首次建立、补建遗漏或变化的有向关系；无依据或均无变化就写 none",
     "profile_scan": "已有基础档案的空白字段里，本轮能补全的角色与字段；没有就写 none",
     "lore_scan": "本轮出现的世界观设定（城市/物品/药水/魔法/势力等）；没有就写 none"
   },
@@ -247,6 +260,7 @@ ${LORE_UPDATE_PROMPT}
     {"name": "角色名，不要使用人称代词或别名，只用正式人名", "trajectory": "当前阶段描述(15字内)", "progress": 0.0-1.0, "newMoment": "本次新增的关键时刻"}
   ],
   "factUpdates": [
+    {"s": "角色甲", "p": "对角色乙的看法", "o": "因对方归还失物而产生初步信任（格式示例，勿照抄人物或情节）", "isState": true, "trend": "投缘"},
     {"s": "主体", "p": "谓词", "o": "当前值", "isState": true, "trend": "仅关系类填"},
     {"s": "要删除的主体", "p": "要删除的谓词", "retracted": true}
   ],
@@ -268,7 +282,7 @@ ${LORE_UPDATE_PROMPT}
 - summary 按 doc 中的“Event Summary Style”执行，不要写成泛化概括
 - keywords 是全局关键词，综合已有+新增
 - causedBy 仅在因果明确时填写，允许为[]，0-2个
-- factUpdates 可为空数组
+- factUpdates 可为空数组，但须先完成关系检查；初次关系和有证据的遗漏关系也是新增事实，不能因角色或事件已记录而跳过
 - characterAliasUpdates 是可选字段；没有明确身份揭示时不要输出这个 key
 - profileUpdates 与 loreUpdates 每批都要检查一遍：有依据就输出，确实没有就省略这个 key；不要因为“已经在别处写过”而跳过检查
 - 合法JSON，字符串值内部避免英文双引号

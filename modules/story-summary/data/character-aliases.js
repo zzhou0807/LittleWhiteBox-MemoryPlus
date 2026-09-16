@@ -1,6 +1,8 @@
 // Story Summary - Character aliases
 // Pure helpers for identity reveal handling and deterministic canonicalization.
 
+import { parseRelationTarget } from './fact-predicates.js';
+
 function isPlainObject(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -255,18 +257,11 @@ export function buildAliasResolver(aliases) {
 
 function canonicalizeRelationPredicate(predicate, resolver) {
     const p = String(predicate || '').trim();
-    const opinion = p.match(/^对(.+)的看法$/);
-    if (opinion) {
-        const name = resolver.resolveName(opinion[1]);
+    const target = parseRelationTarget(p);
+    if (target) {
+        const name = resolver.resolveName(target);
         return name ? `对${name}的看法` : p;
     }
-
-    const relation = p.match(/^与(.+)的关系$/);
-    if (relation) {
-        const name = resolver.resolveName(relation[1]);
-        return name ? `与${name}的关系` : p;
-    }
-
     return p;
 }
 
